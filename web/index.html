@@ -284,7 +284,7 @@
     <button class="page-scrim drawer-scrim" id="drawerScrim" type="button" aria-label="关闭设置" tabindex="-1"></button>
     <aside class="settings-drawer" id="settingsDrawer" aria-label="设置" aria-hidden="true" tabindex="-1">
       <header>
-        <div><small>MIYU</small><strong>设置</strong></div>
+        <div><small>POS</small><strong>设置</strong></div>
         <button class="icon-button" id="settingsClose" type="button" title="关闭设置" aria-label="关闭设置">
           <span class="icon-slot" data-icon="x" aria-hidden="true"><span class="icon-fallback">×</span></span>
         </button>
@@ -416,6 +416,12 @@
         </footer>
       </form>
     </dialog>
+  </div>
+
+  <!-- Live2D 模型展示容器（无模型文件时隐藏） -->
+  <div class="live2d-container" id="live2dContainer" aria-hidden="true" hidden>
+    <canvas id="live2dCanvas" width="300" height="400"></canvas>
+    <p class="live2d-fallback" id="live2dFallback">Live2D 模型未加载</p>
   </div>
 
   <noscript>

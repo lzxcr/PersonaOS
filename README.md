@@ -80,6 +80,13 @@ pos persona <name> # 切换人格
 
 PersonaOS 使用 MIT License 发布，见 `LICENSE`。
 
----
+## 致谢
 
-*项目前身为 Miyu（一个二次元 AI 助手）。PersonaOS 将其重构为不绑定任何具体人格的通用人格平台。Miyu、三舟等角色将以扩展人格的形式重新接入。*
+PersonaOS 的前身是 [Miyu](https://github.com/SHORiN-KiWATA/Miyu)（一个终端 AI 助手），感谢 SHORiN-KiWATA 的开源贡献。本项目在其基础上重构为不绑定具体人格的通用平台。
+
+同时致谢以下参考项目：
+
+- [Opencode](https://github.com/anomalyco/opencode) — 公共模型服务
+- [Claude Code](https://github.com/anthropics/claude-code) — agent 交互范式
+- [NapCatQQ](https://github.com/NapNeko/NapCatQQ) — QQ 协议适配
+- [Astrbot](https://github.com/AstrBotDevs/AstrBot) — 插件设计参考

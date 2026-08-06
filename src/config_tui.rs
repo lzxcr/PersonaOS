@@ -116,7 +116,7 @@ fn run_main_menu(
         ];
         draw_menu(
             stdout,
-            t(" MIYU CONFIG ", " MIYU 配置 "),
+            t(" POS CONFIG ", " POS 配置 "),
             &options,
             selected,
             "",

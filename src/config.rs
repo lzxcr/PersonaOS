@@ -89,6 +89,10 @@ pub struct PlatformsConfig {
     pub commands: BTreeMap<String, PlatformCommandConfig>,
     #[serde(default, skip_serializing_if = "OneBotConfig::is_default")]
     pub qq: OneBotConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<TelegramConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qq_official: Option<QqOfficialConfig>,
 }
 
 impl Default for PlatformsConfig {
@@ -97,6 +101,8 @@ impl Default for PlatformsConfig {
             command_prefix: default_platform_command_prefix(),
             commands: BTreeMap::new(),
             qq: OneBotConfig::default(),
+            telegram: None,
+            qq_official: None,
         }
     }
 }
@@ -104,6 +110,18 @@ impl Default for PlatformsConfig {
 impl PlatformsConfig {
     pub fn is_empty(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Resolve plugin configuration for a platform identifier.
+    /// Returns `None` when the platform has no plugin table (platform not
+    /// configured or doesn't support plugin toggles).
+    pub fn plugin_config(&self, platform: &str) -> Option<&PlatformPluginsConfig> {
+        match platform {
+            "onebot" | "qq" => Some(&self.qq.plugins),
+            "telegram" => self.telegram.as_ref().map(|cfg| &cfg.plugins),
+            "qq_official" => self.qq_official.as_ref().map(|cfg| &cfg.plugins),
+            _ => None,
+        }
     }
 
     pub fn command_permission(
@@ -1683,9 +1701,9 @@ impl Default for PlatformPersonaOverride {
     }
 }
 
-/// Persona filename used to activate the builtin Sanzhou persona. The file
-/// need not exist: when absent, the embedded Sanzhou prompt is used instead.
-pub const SANZHOU_PERSONA_FILE: &str = "Sanzhou.md";
+/// Persona filename used to activate the builtin default platform persona. The file
+/// need not exist: when absent, the embedded prompt is used instead.
+pub const DEFAULT_PLATFORM_PERSONA_FILE: &str = "Default.md";
 
 impl PlatformPersonaOverride {
     pub fn is_inherit(&self) -> bool {
@@ -1711,7 +1729,7 @@ impl PlatformPersonaOverride {
 //
 // Serialization produces the format:
 //   Inherit → {"mode":"inherit"}
-//   Builtin → {"mode":"builtin","name":"miyu"}
+//   Builtin → {"mode":"builtin","name":"default"}
 //   Custom  → {"mode":"custom","name":"Group.md"}
 
 impl Serialize for PlatformPersonaOverride {
@@ -2172,6 +2190,74 @@ impl OneBotConfig {
                 PlatformConversationKind::Group => self.group_chats.session_limits,
             })
             .unwrap_or(self.session_limits)
+    }
+}
+
+/// Telegram Bot API integration (getUpdates polling + webhook).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramConfig {
+    pub enabled: bool,
+    pub bot_token: String,
+    /// Webhook mode: URL path prefix exposed on the daemon HTTP port.
+    /// When empty, uses long-polling via getUpdates.
+    pub webhook_path: String,
+    pub admin_users: Vec<i64>,
+    pub group_intermediate_messages: bool,
+    pub private_intermediate_messages: bool,
+    #[serde(default, skip_serializing_if = "PlatformSessionLimits::is_default")]
+    pub session_limits: PlatformSessionLimits,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plugins: PlatformPluginsConfig,
+    pub max_reply_chars: usize,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bot_token: String::new(),
+            webhook_path: String::new(),
+            admin_users: Vec::new(),
+            group_intermediate_messages: false,
+            private_intermediate_messages: true,
+            session_limits: PlatformSessionLimits::default(),
+            plugins: PlatformPluginsConfig::new(),
+            max_reply_chars: 3000,
+        }
+    }
+}
+
+/// QQ Official Bot API integration (WebSocket + HTTP).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QqOfficialConfig {
+    pub enabled: bool,
+    pub app_id: String,
+    pub client_secret: String,
+    pub admin_users: Vec<i64>,
+    pub group_intermediate_messages: bool,
+    pub private_intermediate_messages: bool,
+    #[serde(default, skip_serializing_if = "PlatformSessionLimits::is_default")]
+    pub session_limits: PlatformSessionLimits,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plugins: PlatformPluginsConfig,
+    pub max_reply_chars: usize,
+}
+
+impl Default for QqOfficialConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            app_id: String::new(),
+            client_secret: String::new(),
+            admin_users: Vec::new(),
+            group_intermediate_messages: false,
+            private_intermediate_messages: true,
+            session_limits: PlatformSessionLimits::default(),
+            plugins: PlatformPluginsConfig::new(),
+            max_reply_chars: 3000,
+        }
     }
 }
 
@@ -4941,7 +5027,7 @@ impl AppConfig {
             return std::fs::read_to_string(&path)
                 .with_context(|| format!("failed to read {}", path.display()));
         }
-        // If it maps to a known builtin persona (e.g. "Miyu.md" → "miyu"),
+        // If it maps to a known builtin persona (e.g. "Default.md" → "default"),
         // load the embedded prompt.
         let canonical = active.strip_suffix(".md").unwrap_or(active);
         if let Some(persona) = crate::prompts::builtin_persona(canonical) {

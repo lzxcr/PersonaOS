@@ -11,6 +11,8 @@ mod assets;
 pub(crate) mod commands;
 pub(crate) mod onebot;
 pub(crate) mod plugins;
+pub(crate) mod qq_official;
+pub(crate) mod telegram;
 mod tool;
 mod types;
 
@@ -757,9 +759,8 @@ impl PlatformTurnContext {
     pub(crate) fn plugin_enabled(&self, id: &str, default_enabled: bool) -> bool {
         self.config
             .platforms
-            .qq
-            .plugins
-            .get(id)
+            .plugin_config(&self.conversation.platform)
+            .and_then(|plugins| plugins.get(id))
             .and_then(|plugin| plugin.enabled)
             .unwrap_or(default_enabled)
     }
@@ -1217,7 +1218,8 @@ fn message_is_parenthetical_only(message: &OutboundMessage) -> bool {
             OutboundSegment::Mention(_) => {}
             OutboundSegment::ImageBytes { .. }
             | OutboundSegment::ImagePath { .. }
-            | OutboundSegment::FilePath { .. } => return false,
+            | OutboundSegment::FilePath { .. }
+            | OutboundSegment::Audio { .. } => return false,
         }
     }
     let text = text.trim();
@@ -1245,7 +1247,7 @@ fn message_is_parenthetical_only(message: &OutboundMessage) -> bool {
     depth == 0
 }
 
-fn outbound_text_for_history(message: &OutboundMessage) -> String {
+pub(crate) fn outbound_text_for_history(message: &OutboundMessage) -> String {
     fn append(parts: &mut Vec<String>, segments: &[OutboundSegment]) {
         for segment in segments {
             match segment {
@@ -1257,7 +1259,8 @@ fn outbound_text_for_history(message: &OutboundMessage) -> String {
                 OutboundSegment::Mention(user_id) => parts.push(format!("@{user_id}")),
                 OutboundSegment::ImageBytes { .. }
                 | OutboundSegment::ImagePath { .. }
-                | OutboundSegment::FilePath { .. } => {}
+                | OutboundSegment::FilePath { .. }
+                | OutboundSegment::Audio { .. } => {}
             }
         }
     }

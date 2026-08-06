@@ -4,7 +4,7 @@ These fonts are loaded only by PersonaOS's long-image renderer worker. The worke
 starts with the CJK font and adds the Emoji font only for content that needs it.
 They are installed under `/usr/share/pos/fonts` so rendering is deterministic
 and never needs to scan host fonts. Development builds read this directory in
-the source tree. `MIYU_RENDERER_FONTS_DIR` can override the location for
+the source tree. `POS_RENDERER_FONTS_DIR` can override the location for
 portable builds.
 
 - `NotoSansCJK-Regular.ttc`: unmodified Noto Sans CJK release `Sans2.004`

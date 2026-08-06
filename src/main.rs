@@ -12,6 +12,7 @@ mod i18n;
 mod ipc;
 mod llm;
 mod logging;
+mod media;
 mod memory;
 mod models_cache;
 mod paths;

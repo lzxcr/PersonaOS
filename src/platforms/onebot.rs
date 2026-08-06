@@ -5101,6 +5101,9 @@ impl OneBotAdapter {
                     push_message_frame(&mut frames, &mut current, &mut current_image_digests);
                     files.push((path, name));
                 }
+                OutboundSegment::Audio { .. } => {
+                    // Voice messages not supported via OneBot; skip.
+                }
             }
         }
         push_message_frame(&mut frames, &mut current, &mut current_image_digests);
@@ -5198,6 +5201,9 @@ impl OneBotAdapter {
                     }
                     OutboundSegment::FilePath { .. } => {
                         bail!("files cannot be embedded in a OneBot forward node")
+                    }
+                    OutboundSegment::Audio { .. } => {
+                        bail!("audio cannot be embedded in a OneBot forward node")
                     }
                 }
             }

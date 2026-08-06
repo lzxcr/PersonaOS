@@ -783,7 +783,8 @@ fn strip_trailing_chinese_period(message: &mut OutboundMessage) {
             OutboundSegment::Mention(_)
             | OutboundSegment::ImageBytes { .. }
             | OutboundSegment::ImagePath { .. }
-            | OutboundSegment::FilePath { .. } => continue,
+            | OutboundSegment::FilePath { .. }
+            | OutboundSegment::Audio { .. } => continue,
         };
         let trimmed_len = text.trim_end().len();
         if trimmed_len == 0 {

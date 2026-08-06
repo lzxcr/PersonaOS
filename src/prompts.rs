@@ -87,7 +87,7 @@ pub fn is_builtin_canonical(name: &str) -> bool {
 }
 
 /// Returns the persona file name used for `active_persona` when a
-/// non-default builtin is activated (e.g. `Sanzhou.md`).
+/// non-default builtin is activated (e.g. `Default.md`).
 pub fn builtin_persona_file(name: &str) -> String {
     let name = name.trim();
     let stem = name.strip_suffix(".md").unwrap_or(name);
@@ -150,7 +150,7 @@ mod tests {
         // framework has something to resolve. Production builds keep it empty.
         assert!(builtin_persona("test").is_some());
         assert!(builtin_persona("pos").is_none());
-        assert!(builtin_persona("sanzhou").is_none());
+        assert!(builtin_persona("alice").is_none());
         assert!(builtin_persona("nobody").is_none());
 
         let default = default_builtin_persona().unwrap();
@@ -168,8 +168,8 @@ mod tests {
     #[test]
     fn builtin_persona_file_names() {
         assert_eq!(builtin_persona_file("alice"), "Alice.md");
-        assert_eq!(builtin_persona_file("sanzhou"), "Sanzhou.md");
+        assert_eq!(builtin_persona_file("alice"), "Alice.md");
         // Already with .md suffix.
-        assert_eq!(builtin_persona_file("Sanzhou.md"), "Sanzhou.md");
+        assert_eq!(builtin_persona_file("Alice.md"), "Alice.md");
     }
 }

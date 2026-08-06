@@ -256,7 +256,7 @@ impl KnowledgeBase {
             .collect::<rusqlite::Result<Vec<FileRecord>>>()
             .map_err(anyhow::Error::from)?;
         // The bundled Arch Linux knowledge base belongs to the PersonaOS persona;
-        // other builtin personas (e.g. Sanzhou) only see their own content.
+        // other builtin personas (e.g. "default") only see their own content.
         if self.is_non_default_builtin() {
             records.retain(|record| !record.name.starts_with("default-kb/"));
         }

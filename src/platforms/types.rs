@@ -264,6 +264,13 @@ pub(crate) enum OutboundSegment {
         path: PathBuf,
         name: Option<String>,
     },
+    /// Synthesised voice audio. Platforms that support voice messages send
+    /// natively; others fall back to a text description.
+    Audio {
+        data: Vec<u8>,
+        mime: String,
+        duration_secs: u64,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -329,6 +336,28 @@ impl SendReceipt {
             || !self.image_message_ids.is_empty()
             || !self.image_digests.is_empty()
             || self.response_target_delivered
+    }
+
+    /// Convenience: single text message, no images, delivered.
+    pub(crate) fn text(message_id: String) -> Self {
+        Self {
+            message_ids: vec![message_id],
+            image_message_ids: Vec::new(),
+            delivered_parts: 1,
+            image_digests: Vec::new(),
+            response_target_delivered: false,
+        }
+    }
+
+    /// Convenience: empty receipt (for cases where no stable ID is available).
+    pub(crate) fn empty() -> Self {
+        Self {
+            message_ids: vec!["sent".to_string()],
+            image_message_ids: Vec::new(),
+            delivered_parts: 1,
+            image_digests: Vec::new(),
+            response_target_delivered: false,
+        }
     }
 }
 

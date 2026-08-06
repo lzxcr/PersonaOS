@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 /// Checkpoint of an interrupted subagent run: the full live message history
 /// (including every completed tool round) plus the consumed step budget, so a
 /// follow-up `task` call with `resume_id` continues instead of starting over.
-/// Process-local by design — a daemon restart clears them.
+/// Stored in-memory for fast access and persisted to disk for daemon restart
+/// survival.
 struct SubagentCheckpoint {
     messages: Vec<ChatMessage>,
     steps: usize,
@@ -29,6 +30,39 @@ fn checkpoints() -> &'static Mutex<HashMap<String, SubagentCheckpoint>> {
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Directory where checkpoints are persisted across daemon restarts.
+fn checkpoint_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let dir = std::path::PathBuf::from(home).join(".pos/state/subagent-checkpoints");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+fn checkpoint_path(id: &str) -> Option<std::path::PathBuf> {
+    checkpoint_dir().map(|dir| dir.join(format!("{id}.json")))
+}
+
+fn persist_checkpoint(id: &str, ckpt: &SubagentCheckpoint) {
+    let Some(path) = checkpoint_path(id) else { return };
+    let data = json!({
+        "messages": ckpt.messages,
+        "steps": ckpt.steps,
+    });
+    if let Ok(json_str) = serde_json::to_string(&data) {
+        let _ = std::fs::write(&path, json_str);
+    }
+}
+
+fn load_checkpoint_from_disk(id: &str) -> Option<(Vec<ChatMessage>, usize)> {
+    let path = checkpoint_path(id)?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let data: Value = serde_json::from_str(&raw).ok()?;
+    let messages: Vec<ChatMessage> = serde_json::from_value(data["messages"].clone()).ok()?;
+    let steps = data["steps"].as_u64().unwrap_or(0) as usize;
+    let _ = std::fs::remove_file(&path);
+    Some((messages, steps))
+}
+
 fn store_checkpoint(messages: Vec<ChatMessage>, steps: usize) -> String {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let id = format!("subagent-ckpt-{}", NEXT.fetch_add(1, Ordering::Relaxed));
@@ -41,23 +75,36 @@ fn store_checkpoint(messages: Vec<ChatMessage>, steps: usize) -> String {
             .map(|(key, _)| key.clone());
         if let Some(oldest) = oldest {
             store.remove(&oldest);
+            // Clean up disk copy for evicted checkpoint.
+            if let Some(path) = checkpoint_path(&oldest) {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
-    store.insert(
-        id.clone(),
-        SubagentCheckpoint {
-            messages,
-            steps,
-            created: Instant::now(),
-        },
-    );
+    let ckpt = SubagentCheckpoint {
+        messages,
+        steps,
+        created: Instant::now(),
+    };
+    persist_checkpoint(&id, &ckpt);
+    store.insert(id.clone(), ckpt);
     id
 }
 
 fn take_checkpoint(id: &str) -> Option<(Vec<ChatMessage>, usize)> {
     let mut store = checkpoints().lock().unwrap();
     store.retain(|_, ckpt| ckpt.created.elapsed() < CHECKPOINT_TTL);
-    store.remove(id).map(|ckpt| (ckpt.messages, ckpt.steps))
+    // Try in-memory first.
+    if let Some(ckpt) = store.remove(id) {
+        // Clean up disk copy.
+        if let Some(path) = checkpoint_path(id) {
+            let _ = std::fs::remove_file(&path);
+        }
+        return Some((ckpt.messages, ckpt.steps));
+    }
+    drop(store);
+    // Fall back to disk (survives daemon restart).
+    load_checkpoint_from_disk(id)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -351,7 +398,7 @@ impl SubagentRunner {
                     (messages, steps)
                 }
                 None => bail!(
-                    "resume_id '{id}' not found or expired (checkpoints are process-local and cleared on restart); re-issue the task without resume_id"
+                    "resume_id '{id}' not found or expired; re-issue the task without resume_id"
                 ),
             },
             None => (

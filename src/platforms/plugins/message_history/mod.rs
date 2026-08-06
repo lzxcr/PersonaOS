@@ -386,7 +386,8 @@ fn append_segment_text(parts: &mut Vec<String>, segments: &[OutboundSegment]) {
             OutboundSegment::Mention(user_id) => parts.push(format!("@{user_id}")),
             OutboundSegment::ImageBytes { .. }
             | OutboundSegment::ImagePath { .. }
-            | OutboundSegment::FilePath { .. } => {}
+            | OutboundSegment::FilePath { .. }
+            | OutboundSegment::Audio { .. } => {}
         }
     }
 }
