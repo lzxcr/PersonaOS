@@ -35,7 +35,7 @@ PersonaOS
 
 ## 有什么功能？
 
-`pos` 由大模型驱动，默认接入了 [opencode](https://github.com/anomalyco/opencode) 的公共模型服务，你也可以配置自己的大模型服务。框架能力与人格解耦，任何人格都能使用完整工具集。
+`pos` 由大模型驱动，**不预置任何模型供应商**——你需要自行在 `pos config` 中配置供应商和 API key。支持任何 OpenAI 兼容 API。
 
 - 终端集成：与 `fish`、`zsh`、`bash` 集成，终端打字直接对话
 - REPL 交互模式、TUI 配置界面、WebUI 网页

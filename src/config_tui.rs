@@ -8,7 +8,7 @@ use crate::config::{
     MAX_PLATFORM_COMMAND_PREFIX_CHARS, MAX_PLATFORM_SESSION_QUEUED, MAX_PLATFORM_SESSION_RUNNING,
     QQ_MEME_COLLECTOR_PLUGIN_ID, QQ_MESSAGE_HISTORY_PLUGIN_ID, REAL_CONTEXT_PLUGIN_ID,
 };
-use crate::default_models::{OPENCODE_DEFAULT_VISION_MODEL, OPENCODE_PROVIDER_ID};
+use crate::default_models::OPENCODE_PROVIDER_ID;
 use crate::i18n::{is_zh, text as t};
 use crate::llm::{
     thinking_variant_options_for_model, ThinkingVariantOptions, ThinkingVariantPreferences,
@@ -2569,14 +2569,11 @@ impl ModelEntry {
 
 fn fetch_models(provider: &ProviderConfig) -> Result<Vec<String>> {
     let api_key = provider.api_key.as_deref().unwrap_or_default();
-    let mut api_key = if let Some(env_name) = api_key.strip_prefix("$env:") {
+    let api_key = if let Some(env_name) = api_key.strip_prefix("$env:") {
         std::env::var(env_name).unwrap_or_default()
     } else {
         api_key.to_string()
     };
-    if api_key.is_empty() && provider.is_opencode_zen() {
-        api_key = "public".to_string();
-    }
     let url = models_url(&provider.base_url);
     let mut request = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(provider.timeout_seconds))
@@ -7179,9 +7176,7 @@ fn localized_choice_label(value: &str, zh: bool) -> Option<&'static str> {
 fn provider_model_choice_values(config: &AppConfig, include_current: bool) -> Vec<String> {
     let mut choices = vec![String::new()];
     if include_current {
-        choices.push(format!(
-            "{OPENCODE_PROVIDER_ID}\t{OPENCODE_DEFAULT_VISION_MODEL}"
-        ));
+        choices.push(format!("{OPENCODE_PROVIDER_ID}\tgpt-4o-mini"));
     }
     choices.extend(
         config
@@ -7195,7 +7190,7 @@ fn provider_model_choice_values(config: &AppConfig, include_current: bool) -> Ve
 fn vision_provider_model_choice_values(config: &AppConfig) -> Vec<String> {
     let mut choices = vec![
         String::new(),
-        format!("{OPENCODE_PROVIDER_ID}\t{OPENCODE_DEFAULT_VISION_MODEL}"),
+        format!("{OPENCODE_PROVIDER_ID}\tgpt-4o-mini"),
     ];
     choices.extend(
         config
@@ -7213,7 +7208,7 @@ fn active_multimodal_label(config: &AppConfig) -> String {
     if choices.is_empty() {
         format!(
             "{} / {}",
-            OPENCODE_PROVIDER_ID, OPENCODE_DEFAULT_VISION_MODEL
+            OPENCODE_PROVIDER_ID, "gpt-4o-mini"
         )
     } else if choices.len() == 1 {
         choices[0].label()
@@ -7304,7 +7299,7 @@ fn select_active_multimodal_provider(
 fn vision_provider_value(config: &AppConfig) -> String {
     let vision = &config.plugins.vision;
     if vision.vision_provider_id.trim().is_empty() {
-        format!("{OPENCODE_PROVIDER_ID}\t{OPENCODE_DEFAULT_VISION_MODEL}")
+        format!("{OPENCODE_PROVIDER_ID}\tgpt-4o-mini")
     } else if vision.vision_model.trim().is_empty() {
         config
             .provider(Some(vision.vision_provider_id.trim()))

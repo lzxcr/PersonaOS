@@ -3,7 +3,7 @@ use super::{
     ToolCallFunction, ToolDefinition, Usage,
 };
 use crate::config::{AppConfig, ProviderConfig};
-use crate::default_models::OPENCODE_ZEN_BASE_URL;
+use crate::default_models::OPENCODE_PROVIDER_ID;
 use crate::i18n::text as t;
 use crate::models_cache::{self, ModelReasoningInfo, ReasoningSetting, ReasoningVariant};
 use crate::paths::PersonaPaths;
@@ -2623,7 +2623,7 @@ fn non_stream_quota_fallback_candidate(status: u16, body: &str) -> bool {
 
 fn zen_upstream_failed(provider: &ProviderConfig, status: u16, body: &str) -> bool {
     status == 400
-        && provider.base_url.trim_end_matches('/') == OPENCODE_ZEN_BASE_URL
+        && provider.id == OPENCODE_PROVIDER_ID
         && body
             .to_ascii_lowercase()
             .contains("upstream request failed")
@@ -5341,7 +5341,7 @@ mod tests {
 
     #[test]
     fn zen_upstream_failed_detects_opencode_zen_compat_error() {
-        let provider = test_provider("myopencode", OPENCODE_ZEN_BASE_URL);
+        let provider = test_provider("opencode", "https://test-opencode.example.com/zen/v1");
 
         assert!(zen_upstream_failed(
             &provider,

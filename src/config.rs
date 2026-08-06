@@ -1,7 +1,4 @@
-use crate::default_models::{
-    OPENCODE_DEFAULT_CHAT_MODEL, OPENCODE_DEFAULT_VISION_MODEL, OPENCODE_PROVIDER_ID,
-    OPENCODE_ZEN_BASE_URL,
-};
+use crate::default_models::OPENCODE_PROVIDER_ID;
 use crate::paths::PersonaPaths;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -3061,7 +3058,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             config_version: CURRENT_CONFIG_VERSION,
-            active_provider: OPENCODE_PROVIDER_ID.to_string(),
+            active_provider: "openai".to_string(),
             active_provider_models: None,
             active_multimodal_provider_models: None,
             providers: ProviderConfig::default_templates(),
@@ -3446,23 +3443,6 @@ impl Default for ContextConfig {
 }
 
 impl ProviderConfig {
-    pub fn default_opencodezen() -> Self {
-        Self {
-            id: OPENCODE_PROVIDER_ID.to_string(),
-            display_name: "opencode Zen".to_string(),
-            base_url: OPENCODE_ZEN_BASE_URL.to_string(),
-            protocol: default_provider_protocol(),
-            api_key: None,
-            models: vec![OPENCODE_DEFAULT_CHAT_MODEL.to_string()],
-            model_context_window: HashMap::new(),
-            model_modalities: HashMap::new(),
-            default_model: OPENCODE_DEFAULT_CHAT_MODEL.to_string(),
-            timeout_seconds: default_timeout(),
-            temperature: default_temperature(),
-            anthropic_max_tokens: default_anthropic_max_tokens(),
-            extra_body: None,
-        }
-    }
 
     pub fn default_anthropic() -> Self {
         Self {
@@ -3483,10 +3463,10 @@ impl ProviderConfig {
     }
 
     pub fn default_templates() -> Vec<Self> {
-        let mut providers = vec![Self::default_opencodezen()];
-        providers.extend([
-            Self::template("openai", "OpenAI", "https://api.openai.com/v1"),
+        vec![
+            Self::openai_template(),
             Self::default_anthropic(),
+            Self::template("opencode", "Opencode", "https://opencode.ai/zen/v1"),
             Self::template("deepseek", "DeepSeek", "https://api.deepseek.com"),
             Self::template(
                 "gemini",
@@ -3502,8 +3482,7 @@ impl ProviderConfig {
             Self::template("openrouter", "OpenRouter", "https://openrouter.ai/api/v1"),
             Self::template("ollama", "Ollama", "http://localhost:11434/v1"),
             Self::template("lmstudio", "LMStudio", "http://localhost:1234/v1"),
-        ]);
-        providers
+        ]
     }
 
     fn template(id: &str, display_name: &str, base_url: &str) -> Self {
@@ -3523,6 +3502,25 @@ impl ProviderConfig {
             extra_body: None,
         }
     }
+
+    fn openai_template() -> Self {
+        Self {
+            id: "openai".to_string(),
+            display_name: "OpenAI".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            protocol: default_provider_protocol(),
+            api_key: None,
+            models: vec!["gpt-4o-mini".to_string()],
+            model_context_window: HashMap::new(),
+            model_modalities: HashMap::new(),
+            default_model: "gpt-4o-mini".to_string(),
+            timeout_seconds: default_timeout(),
+            temperature: default_temperature(),
+            anthropic_max_tokens: default_anthropic_max_tokens(),
+            extra_body: None,
+        }
+    }
+
 
     pub fn new_custom() -> Self {
         Self {
@@ -3560,13 +3558,6 @@ impl ProviderConfig {
             append_resolved_api_keys(&mut keys, api_key)?;
         }
 
-        if keys.is_empty() && self.is_opencode_zen() {
-            keys.push(ResolvedProviderKey {
-                index: 0,
-                value: "public".to_string(),
-            });
-        }
-
         if keys.is_empty() {
             bail!("missing API key for provider {}", self.id)
         }
@@ -3576,12 +3567,7 @@ impl ProviderConfig {
         Ok(keys)
     }
 
-    pub fn is_opencode_zen(&self) -> bool {
-        matches!(self.id.as_str(), OPENCODE_PROVIDER_ID | "opencodezen")
-            && self.base_url.trim_end_matches('/') == OPENCODE_ZEN_BASE_URL
-    }
-
-    fn has_configured_model(&self, model: &str) -> bool {
+    pub(crate) fn has_configured_model(&self, model: &str) -> bool {
         let model = model.trim();
         !model.is_empty()
             && (self.default_model == model || self.models.iter().any(|item| item == model))
@@ -3798,18 +3784,20 @@ impl AppConfig {
     }
 
     fn normalize_builtin_providers(&mut self) {
+        // Inject template providers that are not already configured.
         for provider in ProviderConfig::default_templates() {
-            if !self.providers.iter().any(|item| {
-                item.id == provider.id
-                    || provider.id == OPENCODE_PROVIDER_ID && item.is_opencode_zen()
-            }) {
+            if !self.providers.iter().any(|item| item.id == provider.id) {
                 self.providers.push(provider);
             }
         }
+        // Migrate legacy "opencodezen" provider id to "opencode".
         if self.active_provider == "opencodezen" {
             self.active_provider = OPENCODE_PROVIDER_ID.to_string();
         }
         for provider in &mut self.providers {
+            if provider.id == "opencodezen" {
+                provider.id = OPENCODE_PROVIDER_ID.to_string();
+            }
             if provider.is_legacy_default_anthropic_model() {
                 provider.models.clear();
                 provider.default_model.clear();
@@ -3836,22 +3824,35 @@ impl AppConfig {
         if self.plugins.vision.vision_provider_id == "opencodezen" {
             self.plugins.vision.vision_provider_id = OPENCODE_PROVIDER_ID.to_string();
         }
-        if self
-            .provider(None)
-            .map(|provider| provider.default_model.trim().is_empty())
-            .unwrap_or(true)
-        {
-            self.active_provider = OPENCODE_PROVIDER_ID.to_string();
+        // If the active provider is unset, pick the first available.
+        if self.active_provider.is_empty() {
+            if let Some(first) = self.providers.first() {
+                self.active_provider = first.id.clone();
+            }
         }
+        // If active models are empty, populate from the active provider.
         if self
             .active_provider_models
             .as_ref()
             .is_some_and(Vec::is_empty)
         {
-            self.active_provider_models = Some(vec![ActiveProviderModelConfig {
-                provider_id: OPENCODE_PROVIDER_ID.to_string(),
-                model: OPENCODE_DEFAULT_CHAT_MODEL.to_string(),
-            }]);
+            if let Ok(provider) = self.provider(None) {
+                if !provider.default_model.is_empty() {
+                    self.active_provider_models = Some(vec![ActiveProviderModelConfig {
+                        provider_id: provider.id.clone(),
+                        model: provider.default_model.clone(),
+                    }]);
+                } else if let Some(first_model) = provider.models.first() {
+                    self.active_provider_models = Some(vec![ActiveProviderModelConfig {
+                        provider_id: provider.id.clone(),
+                        model: first_model.clone(),
+                    }]);
+                } else {
+                    self.active_provider_models = None;
+                }
+            } else {
+                self.active_provider_models = None;
+            }
         }
     }
 
@@ -4764,7 +4765,7 @@ impl AppConfig {
         }
         Ok((
             OPENCODE_PROVIDER_ID.to_string(),
-            OPENCODE_DEFAULT_VISION_MODEL.to_string(),
+            "gpt-4o-mini".to_string(),
         ))
     }
 
@@ -5237,7 +5238,7 @@ impl AppConfig {
         self.active_provider_models = if provider.default_model.trim().is_empty() {
             Some(vec![ActiveProviderModelConfig {
                 provider_id: OPENCODE_PROVIDER_ID.to_string(),
-                model: OPENCODE_DEFAULT_CHAT_MODEL.to_string(),
+                model: provider.default_model.clone(),
             }])
         } else {
             Some(vec![ActiveProviderModelConfig {
@@ -5916,7 +5917,7 @@ mod tests {
         let choices = config.active_provider_model_choices();
         assert_eq!(choices.len(), 1);
         assert_eq!(choices[0].provider_id, OPENCODE_PROVIDER_ID);
-        assert_eq!(choices[0].model, OPENCODE_DEFAULT_CHAT_MODEL);
+        assert_eq!(choices[0].model, config.providers[0].default_model);
     }
 
     #[test]
@@ -6080,7 +6081,7 @@ mod tests {
             config.vision_provider_choice().unwrap(),
             (
                 OPENCODE_PROVIDER_ID.to_string(),
-                OPENCODE_DEFAULT_VISION_MODEL.to_string()
+                "gpt-4o-mini".to_string()
             )
         );
     }

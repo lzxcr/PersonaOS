@@ -4,8 +4,7 @@
 //! `PlatformAdapter` for the QQ Official Bot API.
 
 use crate::platforms::types::{
-    BotSendAvailability, OutboundBody, OutboundMessage, OutboundSegment, PlatformAdapter,
-    SendReceipt,
+    OutboundBody, OutboundMessage, OutboundSegment, PlatformAdapter, SendReceipt,
 };
 use anyhow::Result;
 use futures_util::future::BoxFuture;
