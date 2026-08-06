@@ -76,6 +76,16 @@ pos persona <name> # 切换人格
 1. 在 `src/prompts/builtin-<name>.md` 编写人格提示词，并在 `src/prompts.rs` 的 `BUILTIN_PERSONAS` 注册表中添加条目（`is_default: true` 标记默认人格）；
 2. 或直接在 `~/.pos/data/prompts/` 放置 `<Name>.md` 人格文件，通过 `pos persona <Name>` 切换。
 
+## 文档
+
+| 文档 | 说明 |
+|---|---|
+| [架构](docs/ARCHITECTURE.md) | 进程模型、模块拓扑、数据流、平台管线 |
+| [CLI 参考](docs/CLI.md) | 全部子命令、参数、Shell 集成 |
+| [配置指南](docs/CONFIG.md) | config.jsonc 字段树、模型池、插件 |
+| [开发指南](docs/DEVELOPMENT.md) | 新增工具/平台/插件的分步教程 |
+| [路线图](docs/ROADMAP.md) | 功能全景、改进方向、技术债务 |
+
 ## 许可
 
 PersonaOS 使用 MIT License 发布，见 `LICENSE`。
