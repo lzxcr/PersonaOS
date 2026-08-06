@@ -1,0 +1,14 @@
+# Build artifacts
+/target
+
+# Logs
+*.log
+
+# Local runtime
+*.pid
+*.sock
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
