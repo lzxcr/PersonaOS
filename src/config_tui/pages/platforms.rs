@@ -6,8 +6,8 @@ use ratatui::widgets::ListState;
 /// 页面状态。
 pub struct PlatformsPage {
     pub state: ListState,
-    /// 字段总览/编辑位置（持久 ListState，ratatui 自动维护滚动 offset）。
-    pub field_state: ListState,
+    /// 字段总览/编辑时保存的平台索引（Esc 回列表时恢复）。
+    pub saved_entity: Option<usize>,
     /// 字段总览模式：true 时显示选中平台的字段值列表。
     pub viewing: bool,
     pub editing: bool,
@@ -20,11 +20,9 @@ impl PlatformsPage {
     pub fn new() -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
-        let mut field_state = ListState::default();
-        field_state.select(Some(0));
         Self {
             state,
-            field_state,
+            saved_entity: None,
             viewing: false,
             editing: false,
             edit_field: 0,

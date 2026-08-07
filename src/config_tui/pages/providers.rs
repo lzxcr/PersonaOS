@@ -7,7 +7,7 @@ use ratatui::widgets::ListState;
 pub struct ProvidersPage {
     pub state: ListState,
     /// 字段总览/编辑位置（持久 ListState）。
-    pub field_state: ListState,
+    pub saved_entity: Option<usize>,
     /// 编辑模式：true 时在内联表单编辑选中供应商字段。
     pub editing: bool,
     pub edit_field: usize,
@@ -23,11 +23,9 @@ impl ProvidersPage {
     pub fn new() -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
-        let mut field_state = ListState::default();
-        field_state.select(Some(0));
         Self {
             state,
-            field_state,
+            saved_entity: None,
             editing: false,
             edit_field: 0,
             edit_buffer: String::new(),

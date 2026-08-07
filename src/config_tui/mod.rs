@@ -493,7 +493,7 @@ impl<'a> App<'a> {
         };
 
         // Field list: use persistent field_state so ratatui maintains scroll offset.
-        pages::sync_field_state(&mut self.providers.field_state, self.providers.edit_field.min(rows.len().saturating_sub(1)));
+        pages::sync_field_state(&mut self.providers.state, self.providers.edit_field.min(rows.len().saturating_sub(1)));
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -504,7 +504,7 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut self.providers.field_state);
+        frame.render_stateful_widget(list, layout[1], &mut self.providers.state);
 
         // Footer: position.
         let count = if viewing || editing {
@@ -720,7 +720,7 @@ impl<'a> App<'a> {
                 })
                 .collect();
 
-            pages::sync_field_state(&mut self.plugins.field_state, self.plugins.edit_field.min(rows.len().saturating_sub(1)));
+            pages::sync_field_state(&mut self.plugins.state, self.plugins.edit_field.min(rows.len().saturating_sub(1)));
             let list = List::new(items)
                 .block(block)
                 .highlight_style(
@@ -730,7 +730,7 @@ impl<'a> App<'a> {
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol(" ▌ ");
-            frame.render_stateful_widget(list, layout[1], &mut self.plugins.field_state);
+            frame.render_stateful_widget(list, layout[1], &mut self.plugins.state);
 
             frame.render_widget(
                 Paragraph::new(Line::from(pages::position_label(self.plugins.edit_field, rows.len())))
@@ -885,11 +885,17 @@ impl<'a> App<'a> {
         let selected = self.platforms.state.selected().unwrap_or(0);
         let editing = self.platforms.editing;
         let viewing = self.platforms.viewing;
+        // In field overview/edit, entity index comes from saved_entity (state is field position).
+        let entity_idx = if viewing || editing {
+            self.platforms.saved_entity.unwrap_or(0)
+        } else {
+            selected
+        };
 
         let (rows, hint): (Vec<String>, Line) = if viewing || editing {
             // ── Field overview mode ─────────────────────────────────────
-            let platform_name = pages::platforms::PLATFORMS.get(selected).map(|p| p.1).unwrap_or("?");
-            let rows = pages::platforms::platform_field_rows(&self.config, selected);
+            let platform_name = pages::platforms::PLATFORMS.get(entity_idx).map(|p| p.1).unwrap_or("?");
+            let rows = pages::platforms::platform_field_rows(&self.config, entity_idx);
             let hint = if let Some(error) = &self.platforms.error_msg {
                 Line::from(format!(" ⚠ {error}"))
             } else if editing {
@@ -924,13 +930,13 @@ impl<'a> App<'a> {
         };
         frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
-        let edit_row = self.platforms.edit_field;
+        // Inline edit: use state.selected() for the editing row (same pattern as global).
+        let edit_row = if editing { self.platforms.state.selected().unwrap_or(0) } else { 0 };
         let items: Vec<ListItem> = rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
                 if editing && i == edit_row {
-                    // Inline edit: current row shows the edit buffer.
                     let label = row.split('=').next().unwrap_or(row).trim().to_string();
                     ListItem::new(Line::from(vec![
                         Span::styled(
@@ -950,9 +956,6 @@ impl<'a> App<'a> {
             })
             .collect();
 
-        // Field list: use persistent field_state so ratatui maintains scroll offset;
-        // self.platforms.state keeps the entity (platform) selection unchanged.
-        pages::sync_field_state(&mut self.platforms.field_state, self.platforms.edit_field.min(rows.len().saturating_sub(1)));
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -963,22 +966,20 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut self.platforms.field_state);
+        // Render using self.platforms.state directly (matching global inline edit pattern).
+        frame.render_stateful_widget(list, layout[1], &mut self.platforms.state);
 
-        // Footer: position (field position in overview/edit, entity position in list).
         let count = if viewing || editing {
-            pages::platforms::platform_field_rows(&self.config, selected).len()
+            pages::platforms::platform_field_rows(&self.config, entity_idx).len()
         } else {
             pages::platforms::PLATFORMS.len()
         };
-        let pos_idx = if viewing || editing {
-            self.platforms.edit_field
-        } else {
-            self.platforms.state.selected().unwrap_or(0)
-        };
         frame.render_widget(
-            Paragraph::new(Line::from(pages::position_label(pos_idx, count)))
-                .style(Style::default().fg(theme.on_surface_variant)),
+            Paragraph::new(Line::from(pages::position_label(
+                self.platforms.state.selected().unwrap_or(0),
+                count,
+            )))
+            .style(Style::default().fg(theme.on_surface_variant)),
             layout[2],
         );
     }
@@ -1367,7 +1368,7 @@ impl<'a> App<'a> {
                         pages::providers::EDITABLE_FIELDS.len(),
                     ) {
                         self.providers.edit_field = next;
-                        pages::sync_field_state(&mut self.providers.field_state, next);
+                        self.providers.state.select(Some(next));
                         self.reload_provider_edit_buffer();
                     }
                     AppEvent::None
@@ -1404,7 +1405,7 @@ impl<'a> App<'a> {
                         pages::providers::EDITABLE_FIELDS.len(),
                     ) {
                         self.providers.edit_field = next;
-                        pages::sync_field_state(&mut self.providers.field_state, next);
+                        self.providers.state.select(Some(next));
                     }
                     AppEvent::None
                 }
@@ -1469,7 +1470,7 @@ impl<'a> App<'a> {
                 // Enter: enter field overview of the selected provider.
                 self.providers.viewing = true;
                 self.providers.edit_field = 0;
-                pages::sync_field_state(&mut self.providers.field_state, 0);
+                pages::sync_field_state(&mut self.providers.state, 0);
                 self.providers.error_msg = None;
                 AppEvent::None
             }
@@ -1682,7 +1683,7 @@ impl<'a> App<'a> {
                 | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
                     if let Some(next) = pages::move_field_index(code, self.plugins.edit_field, field_count) {
                         self.plugins.edit_field = next;
-                        pages::sync_field_state(&mut self.plugins.field_state, next);
+                        self.plugins.state.select(Some(next));
                     }
                     AppEvent::None
                 }
@@ -1761,7 +1762,7 @@ impl<'a> App<'a> {
                 KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
                     if let Some(next) = pages::move_field_index(code, self.plugins.edit_field, field_count) {
                         self.plugins.edit_field = next;
-                        pages::sync_field_state(&mut self.plugins.field_state, next);
+                        self.plugins.state.select(Some(next));
                         self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
                             .get(next).map(|f| f.value.clone()).unwrap_or_default();
                     }
@@ -1819,7 +1820,7 @@ impl<'a> App<'a> {
                 // Enter field overview of the selected plugin.
                 self.plugins.viewing = true;
                 self.plugins.edit_field = 0;
-                pages::sync_field_state(&mut self.plugins.field_state, 0);
+                pages::sync_field_state(&mut self.plugins.state, 0);
                 self.plugins.edit_buffer.clear();
                 self.plugins.error_msg = None;
                 AppEvent::None
@@ -1921,11 +1922,16 @@ impl<'a> App<'a> {
 
     fn handle_platforms_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
-        let selected = self.platforms.state.selected().unwrap_or(0);
+        // In editing/viewing mode, state tracks the field row; entity index in saved_entity.
+        let entity_idx = if self.platforms.editing || self.platforms.viewing {
+            self.platforms.saved_entity.unwrap_or(0)
+        } else {
+            self.platforms.state.selected().unwrap_or(0)
+        };
 
         // ── Inline edit mode ───────────────────────────────────────────
         if self.platforms.editing {
-            let field_count = pages::platforms::platform_fields(&self.config, selected).len();
+            let field_count = pages::platforms::platform_fields(&self.config, entity_idx).len();
             return match code {
                 KeyCode::Esc => {
                     self.platforms.editing = false;
@@ -1933,51 +1939,50 @@ impl<'a> App<'a> {
                     self.platforms.error_msg = None;
                     AppEvent::None
                 }
-                KeyCode::Right | KeyCode::Left
-                    if pages::platforms::platform_field_is_bool(&self.config, selected, self.platforms.edit_field) =>
-                {
-                    let field = self.platforms.edit_field;
+                KeyCode::Right | KeyCode::Left => {
+                    let field = self.platforms.state.selected().unwrap_or(0);
+                    if !pages::platforms::platform_field_is_bool(&self.config, entity_idx, field) {
+                        return AppEvent::None;
+                    }
                     let current = self.platforms.edit_buffer.parse::<bool>().unwrap_or(false);
                     let new_val = (!current).to_string();
-                    if pages::platforms::apply_platform_field(&mut self.config, selected, field, &new_val) {
+                    if pages::platforms::apply_platform_field(&mut self.config, entity_idx, field, &new_val) {
                         self.dirty = true;
                         self.platforms.edit_buffer =
-                            pages::platforms::platform_field_value(&self.config, selected, field);
+                            pages::platforms::platform_field_value(&self.config, entity_idx, field);
                         self.platforms.error_msg = None;
                     }
                     AppEvent::None
                 }
                 KeyCode::Enter => {
-                    let field = self.platforms.edit_field.min(field_count.saturating_sub(1));
-                    let is_bool = pages::platforms::platform_field_is_bool(&self.config, selected, field);
+                    let field = self.platforms.state.selected().unwrap_or(0).min(field_count.saturating_sub(1));
+                    let is_bool = pages::platforms::platform_field_is_bool(&self.config, entity_idx, field);
                     if is_bool {
-                        // Value already applied via ←/→; just move to next field.
                         let next = (field + 1).min(field_count.saturating_sub(1));
-                        self.platforms.edit_field = next;
+                        self.platforms.state.select(Some(next));
                         self.platforms.edit_buffer =
-                            pages::platforms::platform_field_value(&self.config, selected, next);
+                            pages::platforms::platform_field_value(&self.config, entity_idx, next);
                         return AppEvent::None;
                     }
                     let value = self.platforms.edit_buffer.clone();
-                    if pages::platforms::apply_platform_field(&mut self.config, selected, field, &value) {
+                    if pages::platforms::apply_platform_field(&mut self.config, entity_idx, field, &value) {
                         self.dirty = true;
                         self.platforms.error_msg = None;
-                        // Continuous edit: jump to next field.
                         let next = (field + 1).min(field_count.saturating_sub(1));
-                        self.platforms.edit_field = next;
+                        self.platforms.state.select(Some(next));
                         self.platforms.edit_buffer =
-                            pages::platforms::platform_field_value(&self.config, selected, next);
+                            pages::platforms::platform_field_value(&self.config, entity_idx, next);
                     } else {
                         self.platforms.error_msg = Some(t("Invalid value for this field", "该字段的值无效"));
                     }
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
-                    if let Some(next) = pages::move_field_index(code, self.platforms.edit_field, field_count) {
-                        self.platforms.edit_field = next;
-                        pages::sync_field_state(&mut self.platforms.field_state, next);
+                    let current = self.platforms.state.selected().unwrap_or(0);
+                    if let Some(next) = pages::move_field_index(code, current, field_count) {
+                        self.platforms.state.select(Some(next));
                         self.platforms.edit_buffer =
-                            pages::platforms::platform_field_value(&self.config, selected, next);
+                            pages::platforms::platform_field_value(&self.config, entity_idx, next);
                         self.platforms.error_msg = None;
                     }
                     AppEvent::None
@@ -1996,24 +2001,28 @@ impl<'a> App<'a> {
 
         // ── Field overview mode ────────────────────────────────────────
         if self.platforms.viewing {
-            let field_count = pages::platforms::platform_field_rows(&self.config, selected).len();
+            let field_count = pages::platforms::platform_field_rows(&self.config, entity_idx).len();
             return match code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.platforms.viewing = false;
+                    // Restore entity position in list.
+                    self.platforms.state.select(self.platforms.saved_entity);
+                    self.platforms.saved_entity = None;
                     AppEvent::None
                 }
                 KeyCode::Enter => {
+                    let current = self.platforms.state.selected().unwrap_or(0);
                     self.platforms.edit_buffer = pages::platforms::platform_field_value(
-                        &self.config, selected, self.platforms.edit_field,
+                        &self.config, entity_idx, current,
                     );
                     self.platforms.editing = true;
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j')
                 | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    if let Some(next) = pages::move_field_index(code, self.platforms.edit_field, field_count) {
-                        self.platforms.edit_field = next;
-                        pages::sync_field_state(&mut self.platforms.field_state, next);
+                    let current = self.platforms.state.selected().unwrap_or(0);
+                    if let Some(next) = pages::move_field_index(code, current, field_count) {
+                        self.platforms.state.select(Some(next));
                     }
                     AppEvent::None
                 }
@@ -2049,18 +2058,17 @@ impl<'a> App<'a> {
                 AppEvent::None
             }
             KeyCode::Enter => {
+                let i = self.platforms.state.selected().unwrap_or(0);
+                self.platforms.saved_entity = Some(i);
                 self.platforms.viewing = true;
-                self.platforms.edit_field = 0;
-                pages::sync_field_state(&mut self.platforms.field_state, 0);
+                self.platforms.state.select(Some(0));
                 self.platforms.edit_buffer.clear();
                 self.platforms.error_msg = None;
                 AppEvent::None
             }
             _ => AppEvent::None,
         }
-    }
-
-    fn handle_prompts_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+    }    fn handle_prompts_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
 
         // ── Creating / Renaming mode ────────────────────────────────────

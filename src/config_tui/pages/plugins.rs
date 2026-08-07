@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 pub struct PluginsPage {
     pub state: ListState,
     /// 字段总览/编辑位置（持久 ListState）。
-    pub field_state: ListState,
+    pub saved_entity: Option<usize>,
     /// 字段总览模式：true 时显示选中插件的字段值列表。
     pub viewing: bool,
     pub editing: bool,
@@ -28,11 +28,7 @@ impl PluginsPage {
         state.select(Some(0));
         Self {
             state,
-            field_state: {
-                let mut fs = ListState::default();
-                fs.select(Some(0));
-                fs
-            },
+            saved_entity: None,
             viewing: false,
             editing: false,
             edit_field: 0,
