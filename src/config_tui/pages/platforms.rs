@@ -1,4 +1,4 @@
-//! IM 平台页 — 平台启用/禁用 + 基础字段编辑。
+//! 接入平台页 — 平台启用/禁用 + 字段编辑。
 
 use crate::config::AppConfig;
 use ratatui::widgets::ListState;
@@ -10,8 +10,6 @@ pub struct PlatformsPage {
     pub editing: bool,
     pub edit_field: usize,
     pub edit_buffer: String,
-    /// QQ 深度配置模式：true 时编辑 QQ 高级字段。
-    pub qq_advanced: bool,
 }
 
 impl PlatformsPage {
@@ -23,7 +21,6 @@ impl PlatformsPage {
             editing: false,
             edit_field: 0,
             edit_buffer: String::new(),
-            qq_advanced: false,
         }
     }
 }
@@ -77,11 +74,19 @@ pub fn platform_rows(config: &AppConfig) -> Vec<String> {
 pub fn platform_fields(config: &AppConfig, index: usize) -> Vec<String> {
     match index {
         0 => vec![
-            "enabled".to_string(),
+            format!("enabled = {}", config.platforms.qq.enabled),
             "reverse_ws_port".to_string(),
             "access_token".to_string(),
             "admin_users".to_string(),
             "max_reply_chars".to_string(),
+            "allow_non_admin_host_tools".to_string(),
+            "group_intermediate_messages".to_string(),
+            "private_intermediate_messages".to_string(),
+            "user_identification".to_string(),
+            "show_group_name".to_string(),
+            "asset_base_url".to_string(),
+            "session_limits.running".to_string(),
+            "session_limits.queued".to_string(),
         ],
         1 => {
             let t = config.platforms.telegram.as_ref();
@@ -113,6 +118,61 @@ pub fn platform_fields(config: &AppConfig, index: usize) -> Vec<String> {
     }
 }
 
+/// 字段是否布尔类型（编辑模式空格切换）。
+pub fn platform_field_is_bool(config: &AppConfig, index: usize, field: usize) -> bool {
+    let fields = platform_fields(config, index);
+    let name = fields
+        .get(field)
+        .map(|f| f.split('=').next().unwrap_or(f).trim().to_string())
+        .unwrap_or_default();
+    matches!(
+        name.as_str(),
+        "enabled"
+            | "allow_non_admin_host_tools"
+            | "group_intermediate_messages"
+            | "private_intermediate_messages"
+            | "user_identification"
+            | "show_group_name"
+    )
+}
+
+/// 字段显示标签（更友好的名称）。
+pub fn platform_field_label(index: usize, field: usize) -> String {
+    let names: &[&str] = match index {
+        0 => &[
+            "enabled", "reverse_ws_port", "access_token", "admin_users", "max_reply_chars",
+            "allow_non_admin_host_tools", "group_intermediate_messages",
+            "private_intermediate_messages", "user_identification", "show_group_name",
+            "asset_base_url", "session_limits.running", "session_limits.queued",
+        ],
+        1 => &["enabled", "bot_token", "webhook_path", "admin_users", "max_reply_chars"],
+        2 => &["enabled", "app_id", "client_secret", "admin_users", "max_reply_chars"],
+        _ => &[],
+    };
+    let raw = names.get(field).copied().unwrap_or("");
+    match raw {
+        "enabled" => "启用",
+        "reverse_ws_port" => "反向 WS 端口",
+        "access_token" => "访问令牌",
+        "bot_token" => "Bot Token",
+        "webhook_path" => "Webhook 路径",
+        "app_id" => "App ID",
+        "client_secret" => "客户端密钥",
+        "admin_users" => "管理员 ID",
+        "max_reply_chars" => "单条回复上限",
+        "allow_non_admin_host_tools" => "非管理员可用宿主机工具",
+        "group_intermediate_messages" => "群聊中间消息",
+        "private_intermediate_messages" => "私聊中间消息",
+        "user_identification" => "用户身份标识",
+        "show_group_name" => "显示群名",
+        "asset_base_url" => "静态资源 Base URL",
+        "session_limits.running" => "会话上限(运行中)",
+        "session_limits.queued" => "会话上限(排队)",
+        _ => raw,
+    }
+    .to_string()
+}
+
 /// 读取平台字段当前值。
 pub fn platform_field_value(config: &AppConfig, index: usize, field: usize) -> String {
     let fields = platform_fields(config, index);
@@ -121,6 +181,7 @@ pub fn platform_field_value(config: &AppConfig, index: usize, field: usize) -> S
         .map(|f| f.split('=').next().unwrap_or(f).trim().to_string())
         .unwrap_or_default();
     match (index, name.as_str()) {
+        (0, "enabled") => config.platforms.qq.enabled.to_string(),
         (0, "reverse_ws_port") => config.platforms.qq.reverse_ws_port.to_string(),
         (0, "access_token") => config.platforms.qq.access_token.clone(),
         (0, "admin_users") => config
@@ -132,6 +193,14 @@ pub fn platform_field_value(config: &AppConfig, index: usize, field: usize) -> S
             .collect::<Vec<_>>()
             .join(","),
         (0, "max_reply_chars") => config.platforms.qq.max_reply_chars.to_string(),
+        (0, "allow_non_admin_host_tools") => config.platforms.qq.allow_non_admin_host_tools.to_string(),
+        (0, "group_intermediate_messages") => config.platforms.qq.group_intermediate_messages.to_string(),
+        (0, "private_intermediate_messages") => config.platforms.qq.private_intermediate_messages.to_string(),
+        (0, "user_identification") => config.platforms.qq.user_identification.to_string(),
+        (0, "show_group_name") => config.platforms.qq.show_group_name.to_string(),
+        (0, "asset_base_url") => config.platforms.qq.asset_base_url.clone(),
+        (0, "session_limits.running") => config.platforms.qq.session_limits.running.to_string(),
+        (0, "session_limits.queued") => config.platforms.qq.session_limits.queued.to_string(),
         (1, "bot_token") => config
             .platforms
             .telegram
@@ -205,6 +274,12 @@ pub fn apply_platform_field(config: &mut AppConfig, index: usize, field: usize, 
         .unwrap_or_default();
     let value = value.trim().to_string();
     match (index, name.as_str()) {
+        (0, "enabled") => {
+            let Ok(v) = value.parse::<bool>() else {
+                return false;
+            };
+            config.platforms.qq.enabled = v
+        }
         (0, "reverse_ws_port") => {
             let Ok(v) = value.parse::<u16>() else {
                 return false;
@@ -220,6 +295,37 @@ pub fn apply_platform_field(config: &mut AppConfig, index: usize, field: usize, 
                 return false;
             };
             config.platforms.qq.max_reply_chars = v
+        }
+        (0, "allow_non_admin_host_tools") => {
+            let Ok(v) = value.parse::<bool>() else { return false };
+            config.platforms.qq.allow_non_admin_host_tools = v;
+        }
+        (0, "group_intermediate_messages") => {
+            let Ok(v) = value.parse::<bool>() else { return false };
+            config.platforms.qq.group_intermediate_messages = v;
+        }
+        (0, "private_intermediate_messages") => {
+            let Ok(v) = value.parse::<bool>() else { return false };
+            config.platforms.qq.private_intermediate_messages = v;
+        }
+        (0, "user_identification") => {
+            let Ok(v) = value.parse::<bool>() else { return false };
+            config.platforms.qq.user_identification = v;
+        }
+        (0, "show_group_name") => {
+            let Ok(v) = value.parse::<bool>() else { return false };
+            config.platforms.qq.show_group_name = v;
+        }
+        (0, "asset_base_url") => config.platforms.qq.asset_base_url = value,
+        (0, "session_limits.running") => {
+            let Ok(v) = value.parse::<usize>() else { return false };
+            if v > crate::config::MAX_PLATFORM_SESSION_RUNNING { return false; }
+            config.platforms.qq.session_limits.running = v;
+        }
+        (0, "session_limits.queued") => {
+            let Ok(v) = value.parse::<usize>() else { return false };
+            if v > crate::config::MAX_PLATFORM_SESSION_QUEUED { return false; }
+            config.platforms.qq.session_limits.queued = v;
         }
         (1, "bot_token") => {
             let t = config.platforms.telegram.get_or_insert_with(Default::default);
@@ -335,48 +441,4 @@ mod tests {
         let ids = parse_id_list("1, 2, x, 3");
         assert_eq!(ids, vec![1, 2, 3]);
     }
-}
-
-// ── QQ Advanced fields ─────────────────────────────────────────────────
-
-/// QQ 高级配置字段（label, value）。
-pub fn qq_advanced_fields(config: &crate::config::OneBotConfig) -> Vec<(&'static str, String, bool)> {
-    // (label, value, is_bool)
-    vec![
-        ("allow_non_admin_host_tools", config.allow_non_admin_host_tools.to_string(), true),
-        ("group_intermediate_messages", config.group_intermediate_messages.to_string(), true),
-        ("private_intermediate_messages", config.private_intermediate_messages.to_string(), true),
-        ("user_identification", config.user_identification.to_string(), true),
-        ("show_group_name", config.show_group_name.to_string(), true),
-        ("asset_base_url", config.asset_base_url.clone(), false),
-        ("max_reply_chars", config.max_reply_chars.to_string(), false),
-        ("session_limits.running", config.session_limits.running.to_string(), false),
-        ("session_limits.queued", config.session_limits.queued.to_string(), false),
-    ]
-}
-
-/// 写回 QQ 高级字段。
-pub fn apply_qq_advanced_field(config: &mut crate::config::OneBotConfig, field: usize, value: &str) -> bool {
-    let value = value.trim().to_string();
-    match field {
-        0 => { let Ok(v) = value.parse::<bool>() else { return false }; config.allow_non_admin_host_tools = v; }
-        1 => { let Ok(v) = value.parse::<bool>() else { return false }; config.group_intermediate_messages = v; }
-        2 => { let Ok(v) = value.parse::<bool>() else { return false }; config.private_intermediate_messages = v; }
-        3 => { let Ok(v) = value.parse::<bool>() else { return false }; config.user_identification = v; }
-        4 => { let Ok(v) = value.parse::<bool>() else { return false }; config.show_group_name = v; }
-        5 => config.asset_base_url = value,
-        6 => { let Ok(v) = value.parse::<usize>() else { return false }; config.max_reply_chars = v; }
-        7 => {
-            let Ok(v) = value.parse::<usize>() else { return false };
-            if v > crate::config::MAX_PLATFORM_SESSION_RUNNING { return false; }
-            config.session_limits.running = v;
-        }
-        8 => {
-            let Ok(v) = value.parse::<usize>() else { return false };
-            if v > crate::config::MAX_PLATFORM_SESSION_QUEUED { return false; }
-            config.session_limits.queued = v;
-        }
-        _ => return false,
-    }
-    true
 }
