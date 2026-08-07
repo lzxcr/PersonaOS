@@ -23,6 +23,7 @@ clap = { version = "4.5", features = ["derive"] }
 cosmic-text = { version = "0.15.0", default-features = false, features = ["std", "swash"] }
 crc32fast = "1.4"
 crossterm = "0.28"
+ratatui = "0.29"
 directories = "5.0"
 hex = "0.4"
 html2text = "0.16.7"

@@ -12,3 +12,6 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Upstream Miyu tracking
+Miyu-upstream/

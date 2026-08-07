@@ -42,9 +42,6 @@ mod real_context;
 mod renderer;
 mod reply_processor;
 
-pub(crate) use real_context::active_judgement_skip::{
-    active_judgement_skip_ids, apply_active_judgement_skip_editor_changes,
-};
 pub(crate) use renderer::{renderer_worker_requested, run_renderer_worker};
 
 #[derive(Clone, Copy, Debug)]
