@@ -492,10 +492,8 @@ impl<'a> App<'a> {
                 .collect()
         };
 
-        // Field list: use a local ListState so self.providers.state keeps
-        // the entity (provider) selection unchanged.
-        let mut field_state = ListState::default();
-        field_state.select(Some(self.providers.edit_field.min(rows.len().saturating_sub(1))));
+        // Field list: use persistent field_state so ratatui maintains scroll offset.
+        pages::sync_field_state(&mut self.providers.field_state, self.providers.edit_field.min(rows.len().saturating_sub(1)));
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -506,7 +504,7 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut field_state);
+        frame.render_stateful_widget(list, layout[1], &mut self.providers.field_state);
 
         // Footer: position.
         let count = if viewing || editing {
@@ -722,8 +720,7 @@ impl<'a> App<'a> {
                 })
                 .collect();
 
-            let mut field_state = ListState::default();
-            field_state.select(Some(self.plugins.edit_field.min(rows.len().saturating_sub(1))));
+            pages::sync_field_state(&mut self.plugins.field_state, self.plugins.edit_field.min(rows.len().saturating_sub(1)));
             let list = List::new(items)
                 .block(block)
                 .highlight_style(
@@ -733,7 +730,7 @@ impl<'a> App<'a> {
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol(" ▌ ");
-            frame.render_stateful_widget(list, layout[1], &mut field_state);
+            frame.render_stateful_widget(list, layout[1], &mut self.plugins.field_state);
 
             frame.render_widget(
                 Paragraph::new(Line::from(pages::position_label(self.plugins.edit_field, rows.len())))
@@ -953,10 +950,9 @@ impl<'a> App<'a> {
             })
             .collect();
 
-        // Field list: use a local ListState so self.platforms.state keeps
-        // the entity (platform) selection unchanged.
-        let mut field_state = ListState::default();
-        field_state.select(Some(self.platforms.edit_field.min(rows.len().saturating_sub(1))));
+        // Field list: use persistent field_state so ratatui maintains scroll offset;
+        // self.platforms.state keeps the entity (platform) selection unchanged.
+        pages::sync_field_state(&mut self.platforms.field_state, self.platforms.edit_field.min(rows.len().saturating_sub(1)));
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -967,7 +963,7 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut field_state);
+        frame.render_stateful_widget(list, layout[1], &mut self.platforms.field_state);
 
         // Footer: position (field position in overview/edit, entity position in list).
         let count = if viewing || editing {
@@ -1364,16 +1360,16 @@ impl<'a> App<'a> {
                     self.reload_provider_edit_buffer();
                     AppEvent::None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.providers.edit_field =
-                        self.providers.edit_field.saturating_sub(1);
-                    self.reload_provider_edit_buffer();
-                    AppEvent::None
-                }
-                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
-                    self.providers.edit_field = (self.providers.edit_field + 1)
-                        .min(pages::providers::EDITABLE_FIELDS.len() - 1);
-                    self.reload_provider_edit_buffer();
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    if let Some(next) = pages::move_field_index(
+                        code,
+                        self.providers.edit_field,
+                        pages::providers::EDITABLE_FIELDS.len(),
+                    ) {
+                        self.providers.edit_field = next;
+                        pages::sync_field_state(&mut self.providers.field_state, next);
+                        self.reload_provider_edit_buffer();
+                    }
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1400,22 +1396,15 @@ impl<'a> App<'a> {
                     self.providers.editing = true;
                     AppEvent::None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.providers.edit_field = self.providers.edit_field.saturating_sub(1);
-                    AppEvent::None
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.providers.edit_field = (self.providers.edit_field + 1)
-                        .min(pages::providers::EDITABLE_FIELDS.len() - 1);
-                    AppEvent::None
-                }
-                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    if let Some(next) = pages::nav_index(
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j')
+                | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    if let Some(next) = pages::move_field_index(
                         code,
                         self.providers.edit_field,
                         pages::providers::EDITABLE_FIELDS.len(),
                     ) {
                         self.providers.edit_field = next;
+                        pages::sync_field_state(&mut self.providers.field_state, next);
                     }
                     AppEvent::None
                 }
@@ -1480,6 +1469,7 @@ impl<'a> App<'a> {
                 // Enter: enter field overview of the selected provider.
                 self.providers.viewing = true;
                 self.providers.edit_field = 0;
+                pages::sync_field_state(&mut self.providers.field_state, 0);
                 self.providers.error_msg = None;
                 AppEvent::None
             }
@@ -1688,17 +1678,11 @@ impl<'a> App<'a> {
                     self.plugins.error_msg = None;
                     AppEvent::None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
-                    AppEvent::None
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
-                    AppEvent::None
-                }
-                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    if let Some(next) = pages::nav_index(code, self.plugins.edit_field, field_count) {
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j')
+                | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    if let Some(next) = pages::move_field_index(code, self.plugins.edit_field, field_count) {
                         self.plugins.edit_field = next;
+                        pages::sync_field_state(&mut self.plugins.field_state, next);
                     }
                     AppEvent::None
                 }
@@ -1774,16 +1758,13 @@ impl<'a> App<'a> {
                     }
                     AppEvent::None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
-                    self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
-                        .get(self.plugins.edit_field).map(|f| f.value.clone()).unwrap_or_default();
-                    AppEvent::None
-                }
-                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
-                    self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
-                    self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
-                        .get(self.plugins.edit_field).map(|f| f.value.clone()).unwrap_or_default();
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    if let Some(next) = pages::move_field_index(code, self.plugins.edit_field, field_count) {
+                        self.plugins.edit_field = next;
+                        pages::sync_field_state(&mut self.plugins.field_state, next);
+                        self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
+                            .get(next).map(|f| f.value.clone()).unwrap_or_default();
+                    }
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1838,6 +1819,7 @@ impl<'a> App<'a> {
                 // Enter field overview of the selected plugin.
                 self.plugins.viewing = true;
                 self.plugins.edit_field = 0;
+                pages::sync_field_state(&mut self.plugins.field_state, 0);
                 self.plugins.edit_buffer.clear();
                 self.plugins.error_msg = None;
                 AppEvent::None
@@ -1990,18 +1972,14 @@ impl<'a> App<'a> {
                     }
                     AppEvent::None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.platforms.edit_field = self.platforms.edit_field.saturating_sub(1);
-                    self.platforms.edit_buffer =
-                        pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
-                    self.platforms.error_msg = None;
-                    AppEvent::None
-                }
-                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
-                    self.platforms.edit_field = (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
-                    self.platforms.edit_buffer =
-                        pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
-                    self.platforms.error_msg = None;
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    if let Some(next) = pages::move_field_index(code, self.platforms.edit_field, field_count) {
+                        self.platforms.edit_field = next;
+                        pages::sync_field_state(&mut self.platforms.field_state, next);
+                        self.platforms.edit_buffer =
+                            pages::platforms::platform_field_value(&self.config, selected, next);
+                        self.platforms.error_msg = None;
+                    }
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -2031,17 +2009,11 @@ impl<'a> App<'a> {
                     self.platforms.editing = true;
                     AppEvent::None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.platforms.edit_field = self.platforms.edit_field.saturating_sub(1);
-                    AppEvent::None
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.platforms.edit_field = (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
-                    AppEvent::None
-                }
-                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    if let Some(next) = pages::nav_index(code, self.platforms.edit_field, field_count) {
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j')
+                | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    if let Some(next) = pages::move_field_index(code, self.platforms.edit_field, field_count) {
                         self.platforms.edit_field = next;
+                        pages::sync_field_state(&mut self.platforms.field_state, next);
                     }
                     AppEvent::None
                 }
@@ -2079,6 +2051,7 @@ impl<'a> App<'a> {
             KeyCode::Enter => {
                 self.platforms.viewing = true;
                 self.platforms.edit_field = 0;
+                pages::sync_field_state(&mut self.platforms.field_state, 0);
                 self.platforms.edit_buffer.clear();
                 self.platforms.error_msg = None;
                 AppEvent::None

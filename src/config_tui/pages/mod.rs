@@ -59,6 +59,35 @@ pub fn position_label(current: usize, count: usize) -> String {
     }
 }
 
+/// 字段导航：统一处理 ↑↓/jk/PgUp/PgDn/Home/End。
+/// 返回 Some(new_index) 表示位置变化；None 表示该键不参与字段导航。
+pub fn move_field_index(
+    code: crossterm::event::KeyCode,
+    current: usize,
+    count: usize,
+) -> Option<usize> {
+    use crossterm::event::KeyCode;
+    if count == 0 {
+        return None;
+    }
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => Some(current.saturating_sub(1)),
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+            Some((current + 1).min(count - 1))
+        }
+        KeyCode::PageUp => Some(current.saturating_sub(10)),
+        KeyCode::PageDown => Some((current + 10).min(count - 1)),
+        KeyCode::Home => Some(0),
+        KeyCode::End => Some(count - 1),
+        _ => None,
+    }
+}
+
+/// 同步字段位置到 ListState（编辑/总览模式）。
+pub fn sync_field_state(state: &mut ratatui::widgets::ListState, index: usize) {
+    state.select(Some(index));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
