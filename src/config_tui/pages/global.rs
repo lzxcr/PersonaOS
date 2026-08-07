@@ -31,6 +31,7 @@ pub fn global_rows(config: &AppConfig) -> Vec<String> {
         format!("工具最大轮数        = {}", config.tools.max_rounds),
         format!("工具加载模式        = {}", config.tools.loading_mode),
         format!("记住已加载工具      = {}", config.tools.persist_loaded_tools),
+        format!("子代理并发数        = {}", config.tools.subagent_concurrency),
         format!("Skills 启用         = {}", config.skills.enabled),
         format!("允许执行命令        = {}", config.skills.allow_command_execution),
         format!("界面语言            = {}", config.display.language),
@@ -38,15 +39,18 @@ pub fn global_rows(config: &AppConfig) -> Vec<String> {
         format!("显示工具调用信息    = {}", config.display.tool_calls),
         format!("命令输出显示行数    = {}", config.display.command_output_lines),
         format!("工具名可读显示      = {}", config.display.readable_tool_names),
+        format!("显示 token 用量     = {}", config.display.show_token_usage),
+        format!("混合模型端点显示    = {}", config.display.mixed_model_endpoint_display),
     ]
 }
 
 /// 全局设置字段（编辑用）。
-pub const GLOBAL_FIELDS: [&str; 11] = [
+pub const GLOBAL_FIELDS: [&str; 14] = [
     "tools.enabled",
     "tools.max_rounds",
     "tools.loading_mode",
     "tools.persist_loaded_tools",
+    "tools.subagent_concurrency",
     "skills.enabled",
     "skills.allow_command_execution",
     "display.language",
@@ -54,6 +58,8 @@ pub const GLOBAL_FIELDS: [&str; 11] = [
     "display.tool_calls",
     "display.command_output_lines",
     "display.readable_tool_names",
+    "display.show_token_usage",
+    "display.mixed_model_endpoint_display",
 ];
 
 /// 读取字段当前值。
@@ -65,11 +71,14 @@ pub fn field_value(config: &AppConfig, field: usize) -> String {
         "tools.persist_loaded_tools" => config.tools.persist_loaded_tools.to_string(),
         "skills.enabled" => config.skills.enabled.to_string(),
         "skills.allow_command_execution" => config.skills.allow_command_execution.to_string(),
+        "tools.subagent_concurrency" => config.tools.subagent_concurrency.to_string(),
         "display.language" => config.display.language.clone(),
         "display.reasoning" => config.display.reasoning.clone(),
         "display.tool_calls" => config.display.tool_calls.clone(),
         "display.command_output_lines" => config.display.command_output_lines.to_string(),
         "display.readable_tool_names" => config.display.readable_tool_names.to_string(),
+        "display.show_token_usage" => config.display.show_token_usage.to_string(),
+        "display.mixed_model_endpoint_display" => config.display.mixed_model_endpoint_display.clone(),
         _ => String::new(),
     }
 }
@@ -101,6 +110,15 @@ pub fn apply_field(config: &mut AppConfig, field: usize, value: &str) -> bool {
                 return false;
             };
             config.tools.persist_loaded_tools = v
+        }
+        "tools.subagent_concurrency" => {
+            let Ok(v) = value.parse::<usize>() else {
+                return false;
+            };
+            if !(1..=16).contains(&v) {
+                return false;
+            }
+            config.tools.subagent_concurrency = v
         }
         "skills.enabled" => {
             let Ok(v) = value.parse::<bool>() else {
@@ -145,6 +163,18 @@ pub fn apply_field(config: &mut AppConfig, field: usize, value: &str) -> bool {
             };
             config.display.readable_tool_names = v
         }
+        "display.show_token_usage" => {
+            let Ok(v) = value.parse::<bool>() else {
+                return false;
+            };
+            config.display.show_token_usage = v
+        }
+        "display.mixed_model_endpoint_display" => {
+            if !["hidden", "append", "replace"].contains(&value.as_str()) {
+                return false;
+            }
+            config.display.mixed_model_endpoint_display = value
+        }
         _ => return false,
     }
     true
@@ -161,7 +191,7 @@ mod tests {
     #[test]
     fn global_rows_show_current_values() {
         let rows = global_rows(&test_config());
-        assert_eq!(rows.len(), 11);
+        assert_eq!(rows.len(), 14);
         assert!(rows[0].contains("工具启用"));
         assert!(rows[2].contains("full") || rows[2].contains("hybrid") || rows[2].contains("stub"));
     }
@@ -171,16 +201,32 @@ mod tests {
         let mut config = test_config();
         assert!(apply_field(&mut config, 0, "false"));
         assert!(!config.tools.enabled);
-        assert!(apply_field(&mut config, 6, "zh"));
+        // subagent_concurrency (index 4) validates range 1-16
+        assert!(apply_field(&mut config, 4, "8"));
+        assert_eq!(config.tools.subagent_concurrency, 8);
+        assert!(!apply_field(&mut config, 4, "0"));
+        assert!(!apply_field(&mut config, 4, "17"));
+        // language
+        assert!(apply_field(&mut config, 7, "zh"));
         assert_eq!(config.display.language, "zh");
-        assert!(!apply_field(&mut config, 6, "xx")); // invalid language
+        assert!(!apply_field(&mut config, 7, "xx"));
+        // loading_mode
         assert!(apply_field(&mut config, 2, "stub"));
         assert_eq!(config.tools.loading_mode, "stub");
-        assert!(!apply_field(&mut config, 2, "bogus")); // invalid loading mode
-        assert!(apply_field(&mut config, 7, "hidden"));
+        assert!(!apply_field(&mut config, 2, "bogus"));
+        // reasoning
+        assert!(apply_field(&mut config, 8, "hidden"));
         assert_eq!(config.display.reasoning, "hidden");
-        assert!(!apply_field(&mut config, 1, "abc")); // invalid usize
-        assert!(apply_field(&mut config, 9, "200"));
+        // command_output_lines
+        assert!(apply_field(&mut config, 10, "200"));
         assert_eq!(config.display.command_output_lines, 200);
+        assert!(!apply_field(&mut config, 1, "abc"));
+        // show_token_usage (index 12)
+        assert!(apply_field(&mut config, 12, "true"));
+        assert!(config.display.show_token_usage);
+        // mixed_model_endpoint_display (index 13) validates choices
+        assert!(apply_field(&mut config, 13, "append"));
+        assert_eq!(config.display.mixed_model_endpoint_display, "append");
+        assert!(!apply_field(&mut config, 13, "bogus"));
     }
 }
