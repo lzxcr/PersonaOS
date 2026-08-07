@@ -82,10 +82,10 @@ impl<'a> App<'a> {
             text_model: pages::text_model::TextModelPage::new(),
             multimodal: pages::multimodal::MultimodalPage::default(),
             subagent: pages::subagent::SubagentPage::default(),
-            providers: pages::providers::ProvidersPage::default(),
+            providers: pages::providers::ProvidersPage::new(),
             plugins: pages::plugins::PluginsPage::new(),
             prompts: pages::prompts::PromptsPage::new(),
-            platforms: pages::platforms::PlatformsPage::default(),
+            platforms: pages::platforms::PlatformsPage::new(),
             global: pages::global::GlobalPage::default(),
         })
     }
@@ -176,7 +176,7 @@ impl<'a> App<'a> {
         // ── Status bar ─────────────────────────────────────────────────
         let help_text = match self.screen {
             Screen::MainMenu => t(" q/Esc quit   ↑↓ navigate   Enter select ", " q/Esc 退出   ↑↓ 导航   Enter 选择 "),
-            _ => t(" Esc back  ↑↓/PgUp/PgDn navigate  Enter confirm  Space toggle ", " Esc 返回  ↑↓/翻页 导航  Enter 确认  空格 切换 "),
+            _ => t(" Esc back  ↑↓/PgUp/PgDn navigate  Enter confirm  ←/→ choice ", " Esc 返回  ↑↓/翻页 导航  Enter 确认  ←/→ 切换选项 "),
         };
         let help = Span::styled(
             help_text,
@@ -396,88 +396,55 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
-        // ── Edit mode: field form ──────────────────────────────────────
-        if self.providers.editing {
-            let Some(selected) = self.providers.state.selected() else {
-                return;
-            };
-            let Some(provider) = self.config.providers.get(selected) else {
-                return;
-            };
-            let field = pages::providers::EDITABLE_FIELDS
-                [self.providers.edit_field.min(pages::providers::EDITABLE_FIELDS.len() - 1)];
+        let selected = self.providers.state.selected().unwrap_or(0);
+        let editing = self.providers.editing;
+        let viewing = self.providers.viewing;
 
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-            let value = pages::providers::field_value(provider, self.providers.edit_field);
-            let value_display = if field == "api_key" {
-                // 展示脱敏后的 key 或环境变量名。
-                if value.starts_with("sk-") {
-                    format!("{}…", &value[..6.min(value.len())])
-                } else {
-                    value.clone()
-                }
-            } else {
-                value.clone()
-            };
-
-            let label_line = Line::from(vec![
-                Span::styled(
-                    format!(" {field} "),
-                    Style::default()
-                        .fg(theme.primary_fg)
-                        .bg(theme.primary_container_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" 当前: {value_display}")),
-            ]);
-            frame.render_widget(Paragraph::new(label_line), layout[0]);
-
-            let hint = Line::from(format!(
-                " 输入新值后按 Enter 应用  ↑↓ 切换字段  n 下一字段  Esc 返回列表 "
-            ));
-            frame.render_widget(
-                Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
-                layout[1],
-            );
-
-            let input_box = Paragraph::new(self.providers.edit_buffer.clone())
-                .block(Block::bordered().border_type(BorderType::Rounded))
-                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
-            frame.render_widget(input_box, layout[2]);
-
-            let help_line = Line::from(format!(
-                " 字段 {} / {} ",
-                self.providers.edit_field + 1,
-                pages::providers::EDITABLE_FIELDS.len()
-            ));
-            frame.render_widget(
-                Paragraph::new(help_line).style(Style::default().fg(theme.on_surface_variant)),
-                layout[3],
-            );
-            return;
-        }
-
-        // ── List mode ──────────────────────────────────────────────────
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .title(" 供应商和模型 ")
+            .title(t("Providers and models", "供应商和模型"))
             .title_alignment(Alignment::Center)
             .border_style(Style::default().fg(theme.outline))
             .style(Style::default().bg(theme.surface_bg));
 
-        let rows = pages::providers::provider_rows(
-            &self.config.providers,
-            &self.config.active_provider,
-        );
+        let (rows, hint): (Vec<String>, Line) = if viewing || editing {
+            // ── Field overview mode ─────────────────────────────────────
+            let Some(provider) = self.config.providers.get(selected) else {
+                return;
+            };
+            let rows = pages::providers::provider_field_rows(provider);
+            let hint = if let Some(error) = &self.providers.error_msg {
+                Line::from(format!(" ⚠ {error}"))
+            } else if editing {
+                Line::from(t(
+                    " Type edit  Enter next  ↑↓ field  Esc back ",
+                    " 输入修改  Enter 下一项  ↑↓ 切换字段  Esc 返回 ",
+                ))
+            } else {
+                Line::from(format!(
+                    " {} {} — {}",
+                    t("Provider:", "供应商:"),
+                    provider.id,
+                    t("Enter to edit field, Esc back to list", "Enter 编辑字段  Esc 返回供应商列表")
+                ))
+            };
+            (rows, hint)
+        } else {
+            // ── Provider list mode ─────────────────────────────────────
+            let rows = pages::providers::provider_rows(
+                &self.config.providers,
+                &self.config.active_provider,
+            );
+            let hint = if self.providers.confirming_delete {
+                Line::from(t(" Confirm delete? y / n ", " 确认删除? y 删除  n 取消 "))
+            } else {
+                Line::from(t(
+                    " ↑↓ Navigate  Enter Edit  a Add  d Delete  s Set Active  Esc Back ",
+                    " ↑↓ 导航  Enter 编辑  a 添加  d 删除  s 设为当前  Esc 返回 ",
+                ))
+            };
+            (rows, hint)
+        };
 
         let layout = Layout::default()
             .direction(Direction::Vertical)
@@ -488,28 +455,47 @@ impl<'a> App<'a> {
             ])
             .split(inner);
 
-        let hint = if self.providers.confirming_delete {
-            Line::from(" 确认删除? y 删除  n 取消 ")
+        let hint_style = if self.providers.error_msg.is_some() {
+            Style::default().fg(theme.error_fg).bg(theme.error_bg).add_modifier(Modifier::BOLD)
         } else {
-            Line::from(" ↑↓ 导航  Enter 编辑  a 添加  d 删除  s 设为当前  Esc 返回 ")
+            Style::default().fg(theme.on_surface_variant)
         };
-        frame.render_widget(
-            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
-            layout[0],
-        );
+        frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
+        let edit_row = self.providers.edit_field;
         let items: Vec<ListItem> = if rows.is_empty() {
-            vec![ListItem::new("  （无供应商，按 a 添加）")
+            vec![ListItem::new(t("  (No providers, press a to add)", "  （无供应商，按 a 添加）"))
                 .style(Style::default().fg(theme.on_surface_variant))]
         } else {
             rows.iter()
-                .map(|row| {
-                    ListItem::new(Line::from(format!(" {row}")))
-                        .style(Style::default().fg(theme.on_surface))
+                .enumerate()
+                .map(|(i, row)| {
+                    if editing && i == edit_row {
+                        // Inline edit: current row shows the edit buffer.
+                        let label = row.split('=').next().unwrap_or(row).trim().to_string();
+                        ListItem::new(Line::from(vec![
+                            Span::styled(
+                                format!(" {label} = "),
+                                Style::default().fg(theme.primary_fg).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                self.providers.edit_buffer.clone(),
+                                Style::default().fg(theme.primary_fg).add_modifier(Modifier::UNDERLINED),
+                            ),
+                        ]))
+                        .style(Style::default().bg(theme.primary_container_bg))
+                    } else {
+                        ListItem::new(Line::from(format!(" {row}")))
+                            .style(Style::default().fg(theme.on_surface))
+                    }
                 })
                 .collect()
         };
 
+        let mut state = self.providers.state.clone();
+        if viewing || editing {
+            state.select(Some(if editing { edit_row } else { 0 }));
+        }
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -520,20 +506,23 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut self.providers.state);
+        frame.render_stateful_widget(list, layout[1], &mut state);
+        self.providers.state = state;
 
-        let pos = pages::position_label(
-            self.providers.state.selected().unwrap_or(0),
-            self.config.providers.len(),
-        );
-        let footer = Line::from(format!(
-            " {}  {} | {}",
-            pages::t("Current", "当前"),
-            self.config.active_provider,
-            pos
-        ));
+        // Footer: position.
+        let count = if viewing || editing {
+            pages::providers::EDITABLE_FIELDS.len()
+        } else {
+            self.config.providers.len()
+        };
+        let pos_idx = if viewing || editing {
+            self.providers.edit_field
+        } else {
+            self.providers.state.selected().unwrap_or(0)
+        };
         frame.render_widget(
-            Paragraph::new(footer).style(Style::default().fg(theme.on_surface_variant)),
+            Paragraph::new(Line::from(pages::position_label(pos_idx, count)))
+                .style(Style::default().fg(theme.on_surface_variant)),
             layout[2],
         );
     }
@@ -546,97 +535,16 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
-        if self.global.editing {
-            let field = pages::global::GLOBAL_FIELDS
-                [self.global.state.selected().unwrap_or(0)
-                    .min(pages::global::GLOBAL_FIELDS.len() - 1)];
-            let value = pages::global::field_value(&self.config, self.global.state.selected().unwrap_or(0));
-
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-            let label_line = Line::from(vec![
-                Span::styled(
-                    format!(" {field} "),
-                    Style::default()
-                        .fg(theme.primary_fg)
-                        .bg(theme.primary_container_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" 当前: {value}")),
-            ]);
-            frame.render_widget(Paragraph::new(label_line), layout[0]);
-
-            let hint = if let Some(error) = &self.global.error_msg {
-                Line::from(format!(" ⚠ {error}"))
-            } else {
-                Line::from(t(
-                    " Type new value, Enter apply  ↑↓ field  Space toggle  Esc back ",
-                    " 输入新值 Enter 应用  ↑↓ 切换字段  空格 切换  Esc 返回 ",
-                ))
-            };
-            let hint_style = if self.global.error_msg.is_some() {
-                Style::default().fg(theme.error_fg).bg(theme.error_bg).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.on_surface_variant)
-            };
-            frame.render_widget(
-                Paragraph::new(hint).style(hint_style),
-                layout[1],
-            );
-
-            let input_box = Paragraph::new(self.global.edit_buffer.clone())
-                .block(Block::bordered().border_type(BorderType::Rounded))
-                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
-            frame.render_widget(input_box, layout[2]);
-
-            let field_idx = self.global.state.selected().unwrap_or(0);
-            let choices = pages::global::field_choices(field_idx);
-            let help_text = if !choices.is_empty() {
-                format!(
-                    " {} {}/{}  [{}]",
-                    t("Field", "字段"),
-                    field_idx + 1,
-                    pages::global::GLOBAL_FIELDS.len(),
-                    choices.join(" / ")
-                )
-            } else if pages::global::is_bool_field(field_idx) {
-                format!(
-                    " {} {}/{}  (Space toggle)",
-                    t("Field", "字段"),
-                    field_idx + 1,
-                    pages::global::GLOBAL_FIELDS.len()
-                )
-            } else {
-                format!(
-                    " {} {}/{}",
-                    t("Field", "字段"),
-                    field_idx + 1,
-                    pages::global::GLOBAL_FIELDS.len()
-                )
-            };
-            frame.render_widget(
-                Paragraph::new(Line::from(help_text)).style(Style::default().fg(theme.on_surface_variant)),
-                layout[3],
-            );
-            return;
-        }
-
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .title(" 全局参数设置 ")
+            .title(t("Global settings", "全局参数设置"))
             .title_alignment(Alignment::Center)
             .border_style(Style::default().fg(theme.outline))
             .style(Style::default().bg(theme.surface_bg));
 
         let rows = pages::global::global_rows(&self.config);
+        let editing = self.global.editing;
+        let edit_row = self.global.state.selected().unwrap_or(0);
 
         let layout = Layout::default()
             .direction(Direction::Vertical)
@@ -647,17 +555,48 @@ impl<'a> App<'a> {
             ])
             .split(inner);
 
-        let hint = Line::from(" ↑↓ 导航  Enter 编辑  Esc 返回 ");
+        let hint = if let Some(error) = &self.global.error_msg {
+            Line::from(format!(" ⚠ {error}"))
+        } else if editing {
+            Line::from(t(
+                " Type edit  Enter next  ←/→ choice  ↑↓ field  Esc back ",
+                " 输入修改  Enter 下一项  ←/→ 切换选项  ↑↓ 切换字段  Esc 返回 ",
+            ))
+        } else {
+            Line::from(t(" ↑↓ Navigate  Enter Edit  Esc Back ", " ↑↓ 导航  Enter 编辑  Esc 返回 "))
+        };
+        let hint_style = if self.global.error_msg.is_some() {
+            Style::default().fg(theme.error_fg).bg(theme.error_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.on_surface_variant)
+        };
         frame.render_widget(
-            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            Paragraph::new(hint).style(hint_style),
             layout[0],
         );
 
         let items: Vec<ListItem> = rows
             .iter()
-            .map(|row| {
-                ListItem::new(Line::from(format!(" {row}")))
-                    .style(Style::default().fg(theme.on_surface))
+            .enumerate()
+            .map(|(i, row)| {
+                if editing && i == edit_row {
+                    // Inline edit: current row shows the edit buffer.
+                    let label = row.split('=').next().unwrap_or(row).trim().to_string();
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!(" {label} = "),
+                            Style::default().fg(theme.primary_fg).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            self.global.edit_buffer.clone(),
+                            Style::default().fg(theme.primary_fg).add_modifier(Modifier::UNDERLINED),
+                        ),
+                    ]))
+                    .style(Style::default().bg(theme.primary_container_bg))
+                } else {
+                    ListItem::new(Line::from(format!(" {row}")))
+                        .style(Style::default().fg(theme.on_surface))
+                }
             })
             .collect();
 
@@ -672,6 +611,37 @@ impl<'a> App<'a> {
             .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.global.state);
+
+        // Footer: position + current field type hint.
+        let field_idx = self.global.state.selected().unwrap_or(0);
+        let choices = pages::global::field_choices(field_idx);
+        let help_text = if !choices.is_empty() {
+            format!(
+                " {} {}/{}  [{}]",
+                t("Field", "字段"),
+                field_idx + 1,
+                pages::global::GLOBAL_FIELDS.len(),
+                choices.join(" / ")
+            )
+        } else if pages::global::is_bool_field(field_idx) {
+            format!(
+                " {} {}/{}  (←/→ toggle)",
+                t("Field", "字段"),
+                field_idx + 1,
+                pages::global::GLOBAL_FIELDS.len()
+            )
+        } else {
+            format!(
+                " {} {}/{}",
+                t("Field", "字段"),
+                field_idx + 1,
+                pages::global::GLOBAL_FIELDS.len()
+            )
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(help_text)).style(Style::default().fg(theme.on_surface_variant)),
+            layout[2],
+        );
     }
 
     fn draw_plugins(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
@@ -688,63 +658,89 @@ impl<'a> App<'a> {
             return;
         }
 
-        // ── Detail edit mode ────────────────────────────────────────────
-        if self.plugins.editing {
-            let fields = self.plugins.current_fields(&self.config);
-            let field_idx = self.plugins.edit_field.min(fields.len().saturating_sub(1));
-            if field_idx >= fields.len() {
-                return;
-            }
-            let field = &fields[field_idx];
-            let plugin_id = pages::plugins::plugins()[self.plugins.state.selected().unwrap_or(0)].0;
+        // ── Field overview + inline edit mode ────────────────────────────
+        if self.plugins.viewing || self.plugins.editing {
+            let selected = self.plugins.state.selected().unwrap_or(0);
+            let plugin_id = pages::plugins::plugins().get(selected).map(|p| p.0).unwrap_or("?");
+            let rows = self.plugins.field_rows(&self.config);
+            let editing = self.plugins.editing;
+            let edit_row = self.plugins.edit_field.min(rows.len().saturating_sub(1));
+
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .title(format!(" {plugin_id} "))
+                .title_alignment(Alignment::Center)
+                .border_style(Style::default().fg(theme.outline))
+                .style(Style::default().bg(theme.surface_bg));
 
             let layout = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3),
                     Constraint::Length(1),
-                    Constraint::Length(3),
+                    Constraint::Min(3),
                     Constraint::Length(1),
                 ])
                 .split(inner);
 
-            let label_line = Line::from(vec![
-                Span::styled(plugin_id, Style::default().fg(theme.primary_fg).bg(theme.primary_container_bg).add_modifier(Modifier::BOLD)),
-                Span::raw(format!(" > {} ", field.label)),
-                Span::raw(format!("当前: {}", field.display_value())),
-            ]);
-            frame.render_widget(Paragraph::new(label_line), layout[0]);
-
-            let hint_text = if field.is_bool {
-                t(" Enter/Space toggle  ↑↓ field  Esc back ", " Enter/空格 切换  ↑↓ 切换字段  Esc 返回 ")
-            } else if !field.choices.is_empty() {
-                let mut opts: Vec<String> = field.choices.iter().map(|c| {
-                    if c == &field.value {
-                        format!("▶ {c}")
-                    } else {
-                        format!("  {c}")
-                    }
-                }).collect();
-                let marker = format!(" {} → / {} ←", t("next", "下一个"), t("prev", "上一个"));
-                opts.push(marker);
-                opts.join(" | ")
+            let hint = if let Some(error) = &self.plugins.error_msg {
+                Line::from(format!(" ⚠ {error}"))
+            } else if editing {
+                Line::from(t(
+                    " Type edit  Enter next  ←/→ choice  ↑↓ field  Esc back ",
+                    " 输入修改  Enter 下一项  ←/→ 切换选项  ↑↓ 切换字段  Esc 返回 ",
+                ))
             } else {
-                t(" Enter apply & next  ↑↓ field  Esc back ", " Enter 应用并下一个  ↑↓ 切换字段  Esc 返回 ")
+                Line::from(t(" Enter to edit field  Esc back to list ", " Enter 编辑字段  Esc 返回插件列表 "))
             };
-            frame.render_widget(
-                Paragraph::new(Line::from(hint_text)).style(Style::default().fg(theme.on_surface_variant)),
-                layout[1],
-            );
+            let hint_style = if self.plugins.error_msg.is_some() {
+                Style::default().fg(theme.error_fg).bg(theme.error_bg).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.on_surface_variant)
+            };
+            frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
-            let input_box = Paragraph::new(self.plugins.edit_buffer.clone())
-                .block(Block::bordered().border_type(BorderType::Rounded))
-                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
-            frame.render_widget(input_box, layout[2]);
+            let items: Vec<ListItem> = rows
+                .iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    if editing && i == edit_row {
+                        let label = row.split('=').next().unwrap_or(row).trim().to_string();
+                        ListItem::new(Line::from(vec![
+                            Span::styled(
+                                format!(" {label} = "),
+                                Style::default().fg(theme.primary_fg).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                self.plugins.edit_buffer.clone(),
+                                Style::default().fg(theme.primary_fg).add_modifier(Modifier::UNDERLINED),
+                            ),
+                        ]))
+                        .style(Style::default().bg(theme.primary_container_bg))
+                    } else {
+                        ListItem::new(Line::from(format!(" {row}")))
+                            .style(Style::default().fg(theme.on_surface))
+                    }
+                })
+                .collect();
 
-            let help_line = Line::from(format!(" {} {}/{}", t("Field", "字段"), field_idx + 1, fields.len()));
+            let mut state = self.plugins.state.clone();
+            state.select(Some(if editing { edit_row } else { 0 }));
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(
+                    Style::default()
+                        .fg(theme.primary_fg)
+                        .bg(theme.primary_container_bg)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol(" ▌ ");
+            frame.render_stateful_widget(list, layout[1], &mut state);
+            self.plugins.state = state;
+
             frame.render_widget(
-                Paragraph::new(help_line).style(Style::default().fg(theme.on_surface_variant)),
-                layout[3],
+                Paragraph::new(Line::from(pages::position_label(edit_row, rows.len())))
+                    .style(Style::default().fg(theme.on_surface_variant)),
+                layout[2],
             );
             return;
         }
@@ -884,63 +880,6 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
-        // ── QQ Advanced mode ─────────────────────────────────────────────
-        // ── Edit mode: field form ──────────────────────────────────────
-        if self.platforms.editing {
-            let selected = self.platforms.state.selected().unwrap_or(0);
-            let fields = pages::platforms::platform_fields(&self.config, selected);
-            let field_idx = self
-                .platforms
-                .edit_field
-                .min(fields.len().saturating_sub(1));
-            let field_label = pages::platforms::platform_field_label(selected, field_idx);
-            let is_bool = pages::platforms::platform_field_is_bool(&self.config, selected, field_idx);
-            let value = pages::platforms::platform_field_value(
-                &self.config,
-                selected,
-                field_idx,
-            );
-
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-            let label_line = Line::from(vec![
-                Span::styled(
-                    format!(" {field_label} "),
-                    Style::default()
-                        .fg(theme.primary_fg)
-                        .bg(theme.primary_container_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" 当前: {value}")),
-            ]);
-            frame.render_widget(Paragraph::new(label_line), layout[0]);
-
-            let hint = if is_bool {
-                Line::from(t(" 输入/空格 切换  ↑↓ 字段  Esc 返回 ", " Enter/Space toggle  ↑↓ field  Esc back "))
-            } else {
-                Line::from(t(" 输入新值 Enter 应用  ↑↓ 字段  Esc 返回 ", " Type value Enter apply  ↑↓ field  Esc back "))
-            };
-            frame.render_widget(
-                Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
-                layout[1],
-            );
-
-            let input_box = Paragraph::new(self.platforms.edit_buffer.clone())
-                .block(Block::bordered().border_type(BorderType::Rounded))
-                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
-            frame.render_widget(input_box, layout[2]);
-            return;
-        }
-
-        // ── List mode ──────────────────────────────────────────────────
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(t("Platforms", "接入平台"))
@@ -948,7 +887,31 @@ impl<'a> App<'a> {
             .border_style(Style::default().fg(theme.outline))
             .style(Style::default().bg(theme.surface_bg));
 
-        let rows = pages::platforms::platform_rows(&self.config);
+        let selected = self.platforms.state.selected().unwrap_or(0);
+        let editing = self.platforms.editing;
+        let viewing = self.platforms.viewing;
+
+        let (rows, hint): (Vec<String>, Line) = if viewing || editing {
+            // ── Field overview mode ─────────────────────────────────────
+            let platform_name = pages::platforms::PLATFORMS.get(selected).map(|p| p.1).unwrap_or("?");
+            let rows = pages::platforms::platform_field_rows(&self.config, selected);
+            let hint = if let Some(error) = &self.platforms.error_msg {
+                Line::from(format!(" ⚠ {error}"))
+            } else if editing {
+                Line::from(t(
+                    " Type edit  Enter next  ←/→ choice  ↑↓ field  Esc back ",
+                    " 输入修改  Enter 下一项  ←/→ 切换选项  ↑↓ 切换字段  Esc 返回 ",
+                ))
+            } else {
+                Line::from(format!(" {} {platform_name} — {}", t("Enter to edit", "Enter 编辑字段"), t("Esc back to list", "Esc 返回平台列表")))
+            };
+            (rows, hint)
+        } else {
+            // ── Platform list mode ──────────────────────────────────────
+            let rows = pages::platforms::platform_rows(&self.config);
+            let hint = Line::from(t(" ↑↓ Navigate  Space Toggle  Enter Edit Fields  Esc Back ", " ↑↓ 导航  空格 启用/禁用  Enter 编辑字段  Esc 返回 "));
+            (rows, hint)
+        };
 
         let layout = Layout::default()
             .direction(Direction::Vertical)
@@ -959,20 +922,43 @@ impl<'a> App<'a> {
             ])
             .split(inner);
 
-        let hint = Line::from(" ↑↓ 导航  空格 启用/禁用  Enter 编辑字段  Esc 返回 ");
-        frame.render_widget(
-            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
-            layout[0],
-        );
+        let hint_style = if self.platforms.error_msg.is_some() {
+            Style::default().fg(theme.error_fg).bg(theme.error_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.on_surface_variant)
+        };
+        frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
+        let edit_row = self.platforms.edit_field;
         let items: Vec<ListItem> = rows
             .iter()
-            .map(|row| {
-                ListItem::new(Line::from(format!(" {row}")))
-                    .style(Style::default().fg(theme.on_surface))
+            .enumerate()
+            .map(|(i, row)| {
+                if editing && i == edit_row {
+                    // Inline edit: current row shows the edit buffer.
+                    let label = row.split('=').next().unwrap_or(row).trim().to_string();
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!(" {label} = "),
+                            Style::default().fg(theme.primary_fg).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            self.platforms.edit_buffer.clone(),
+                            Style::default().fg(theme.primary_fg).add_modifier(Modifier::UNDERLINED),
+                        ),
+                    ]))
+                    .style(Style::default().bg(theme.primary_container_bg))
+                } else {
+                    ListItem::new(Line::from(format!(" {row}")))
+                        .style(Style::default().fg(theme.on_surface))
+                }
             })
             .collect();
 
+        let mut state = self.platforms.state.clone();
+        if viewing || editing {
+            state.select(Some(if editing { edit_row } else { 0 }));
+        }
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -983,7 +969,21 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut self.platforms.state);
+        frame.render_stateful_widget(list, layout[1], &mut state);
+        self.platforms.state = state;
+
+        // Footer: position.
+        let count = if viewing || editing {
+            pages::platforms::platform_field_rows(&self.config, selected).len()
+        } else {
+            pages::platforms::PLATFORMS.len()
+        };
+        let pos_idx = if viewing || editing { self.platforms.edit_field } else { self.platforms.state.selected().unwrap_or(0) };
+        frame.render_widget(
+            Paragraph::new(Line::from(pages::position_label(pos_idx, count)))
+                .style(Style::default().fg(theme.on_surface_variant)),
+            layout[2],
+        );
     }
 
     fn draw_prompts(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
@@ -1335,12 +1335,13 @@ impl<'a> App<'a> {
     fn handle_providers_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
 
-        // ── Edit mode ──────────────────────────────────────────────────
+        // ── Inline edit mode ───────────────────────────────────────────
         if self.providers.editing {
             return match code {
                 KeyCode::Esc => {
                     self.providers.editing = false;
                     self.providers.edit_buffer.clear();
+                    self.providers.error_msg = None;
                     AppEvent::None
                 }
                 KeyCode::Enter => {
@@ -1351,6 +1352,9 @@ impl<'a> App<'a> {
                         let changed = pages::providers::apply_field(provider, field, &value);
                         if changed {
                             self.dirty = true;
+                            self.providers.error_msg = None;
+                        } else {
+                            self.providers.error_msg = Some(t("Invalid value for this field", "该字段的值无效"));
                         }
                     }
                     // Continuous edit: jump to next field.
@@ -1377,6 +1381,42 @@ impl<'a> App<'a> {
                 }
                 KeyCode::Char(c) => {
                     self.providers.edit_buffer.push(c);
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── Field overview mode ────────────────────────────────────────
+        if self.providers.viewing {
+            return match code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.providers.viewing = false;
+                    self.providers.edit_field = 0;
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    self.reload_provider_edit_buffer();
+                    self.providers.editing = true;
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.providers.edit_field = self.providers.edit_field.saturating_sub(1);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.providers.edit_field = (self.providers.edit_field + 1)
+                        .min(pages::providers::EDITABLE_FIELDS.len() - 1);
+                    AppEvent::None
+                }
+                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    if let Some(next) = pages::nav_index(
+                        code,
+                        self.providers.edit_field,
+                        pages::providers::EDITABLE_FIELDS.len(),
+                    ) {
+                        self.providers.edit_field = next;
+                    }
                     AppEvent::None
                 }
                 _ => AppEvent::None,
@@ -1415,7 +1455,7 @@ impl<'a> App<'a> {
             };
         }
 
-        // ── List mode ──────────────────────────────────────────────────
+        // ── Provider list mode ─────────────────────────────────────────
         match code {
             KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1437,8 +1477,10 @@ impl<'a> App<'a> {
                 AppEvent::None
             }
             KeyCode::Enter => {
-                self.reload_provider_edit_buffer();
-                self.providers.editing = true;
+                // Enter: enter field overview of the selected provider.
+                self.providers.viewing = true;
+                self.providers.edit_field = 0;
+                self.providers.error_msg = None;
                 AppEvent::None
             }
             KeyCode::Char('a') => {
@@ -1514,33 +1556,41 @@ impl<'a> App<'a> {
                     self.global.error_msg = None;
                     AppEvent::None
                 }
-                KeyCode::Char(' ') if pages::global::is_bool_field(self.global.state.selected().unwrap_or(0)) => {
+                KeyCode::Right | KeyCode::Left => {
                     let field = self.global.state.selected().unwrap_or(0);
-                    let current = self.global.edit_buffer.parse::<bool>().unwrap_or(false);
-                    let new_val = (!current).to_string();
-                    if pages::global::apply_field(&mut self.config, field, &new_val) {
+                    let choices = pages::global::field_choices(field);
+                    let direction = if code == KeyCode::Right { 1 } else { -1 };
+                    let value = if !choices.is_empty() {
+                        // Choices: cycle forward/backward.
+                        let current_index = choices
+                            .iter()
+                            .position(|c| c == &self.global.edit_buffer)
+                            .unwrap_or(0);
+                        let len = choices.len() as isize;
+                        let next = (current_index as isize + direction + len) % len;
+                        choices[next as usize].to_string()
+                    } else if pages::global::is_bool_field(field) {
+                        // Bool: flip.
+                        (!self.global.edit_buffer.parse::<bool>().unwrap_or(false)).to_string()
+                    } else {
+                        return AppEvent::None;
+                    };
+                    if pages::global::apply_field(&mut self.config, field, &value) {
                         self.dirty = true;
-                        self.global.edit_buffer = new_val;
+                        self.global.edit_buffer = value;
                         self.global.error_msg = None;
                     }
                     AppEvent::None
                 }
                 KeyCode::Enter => {
                     let field = self.global.state.selected().unwrap_or(0);
-                    // Choices: cycle forward instead of applying text.
-                    let choices = pages::global::field_choices(field);
-                    if !choices.is_empty() {
-                        let current_index = choices
-                            .iter()
-                            .position(|c| c == &self.global.edit_buffer)
-                            .unwrap_or(0);
-                        let next = (current_index + 1) % choices.len();
-                        let value = choices[next].to_string();
-                        if pages::global::apply_field(&mut self.config, field, &value) {
-                            self.dirty = true;
-                            self.global.edit_buffer = value;
-                            self.global.error_msg = None;
-                        }
+                    let is_bool_or_choices = pages::global::is_bool_field(field)
+                        || !pages::global::field_choices(field).is_empty();
+                    if is_bool_or_choices {
+                        // Value already applied via ←/→; just move to next field.
+                        let next = (field + 1).min(pages::global::GLOBAL_FIELDS.len() - 1);
+                        self.global.state.select(Some(next));
+                        self.global.edit_buffer = pages::global::field_value(&self.config, next);
                         return AppEvent::None;
                     }
                     let value = self.global.edit_buffer.clone();
@@ -1556,26 +1606,12 @@ impl<'a> App<'a> {
                     }
                     AppEvent::None
                 }
-                KeyCode::Left if !pages::global::field_choices(self.global.state.selected().unwrap_or(0)).is_empty() => {
-                    let field = self.global.state.selected().unwrap_or(0);
-                    let choices = pages::global::field_choices(field);
-                    let current_index = choices
-                        .iter()
-                        .position(|c| c == &self.global.edit_buffer)
-                        .unwrap_or(0);
-                    let prev = (current_index + choices.len() - 1) % choices.len();
-                    let value = choices[prev].to_string();
-                    if pages::global::apply_field(&mut self.config, field, &value) {
-                        self.dirty = true;
-                        self.global.edit_buffer = value;
-                    }
-                    AppEvent::None
-                }
                 KeyCode::Up | KeyCode::Char('k') => {
                     let field = self.global.state.selected().unwrap_or(0);
                     let prev = field.saturating_sub(1);
                     self.global.state.select(Some(prev));
                     self.global.edit_buffer = pages::global::field_value(&self.config, prev);
+                    self.global.error_msg = None;
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
@@ -1583,6 +1619,7 @@ impl<'a> App<'a> {
                     let next = (field + 1).min(pages::global::GLOBAL_FIELDS.len() - 1);
                     self.global.state.select(Some(next));
                     self.global.edit_buffer = pages::global::field_value(&self.config, next);
+                    self.global.error_msg = None;
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1636,106 +1673,119 @@ impl<'a> App<'a> {
             return self.handle_quota_key(code);
         }
 
-        // ── Detail edit mode ────────────────────────────────────────────
+        // ── Field overview mode ────────────────────────────────────────
+        if self.plugins.viewing {
+            let field_count = self.plugins.current_fields(&self.config).len();
+            return match code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.plugins.viewing = false;
+                    self.plugins.edit_field = 0;
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let fields = self.plugins.current_fields(&self.config);
+                    self.plugins.edit_field = 0;
+                    self.plugins.edit_buffer = fields.first().map(|f| f.value.clone()).unwrap_or_default();
+                    self.plugins.editing = true;
+                    self.plugins.error_msg = None;
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
+                    AppEvent::None
+                }
+                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    if let Some(next) = pages::nav_index(code, self.plugins.edit_field, field_count) {
+                        self.plugins.edit_field = next;
+                    }
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── Inline edit mode ───────────────────────────────────────────
         if self.plugins.editing {
             let field_count = self.plugins.current_fields(&self.config).len();
             let field_idx = self.plugins.edit_field.min(field_count.saturating_sub(1));
-
             return match code {
                 KeyCode::Esc => {
                     self.plugins.editing = false;
                     self.plugins.edit_buffer.clear();
+                    self.plugins.error_msg = None;
                     AppEvent::None
                 }
-                KeyCode::Enter | KeyCode::Char(' ') => {
+                KeyCode::Right | KeyCode::Left => {
                     let fields = self.plugins.current_fields(&self.config);
-                    let field_idx = field_idx.min(fields.len().saturating_sub(1));
+                    if field_idx >= fields.len() { return AppEvent::None; }
                     let current = &fields[field_idx];
-                    if current.is_bool {
-                        // Toggle boolean field.
-                        let mut updated = fields.clone();
-                        updated[field_idx].value =
-                            (!pages::plugins::parse_bool_field(&current.value).unwrap_or(false)).to_string();
-                        if pages::plugins::apply_plugin_fields(
-                            &mut self.config,
-                            self.plugins.state.selected().unwrap_or(0),
-                            &updated,
-                        ).is_ok() {
-                            self.dirty = true;
-                            self.plugins.edit_buffer = updated[field_idx].value.clone();
-                        }
-                    } else if !current.choices.is_empty() {
-                        // Cycle choices forward.
-                        let choices = &current.choices;
-                        let current_index = choices.iter().position(|c| c == &current.value).unwrap_or(0);
-                        let next = (current_index + 1) % choices.len();
-                        let mut updated = fields.clone();
-                        updated[field_idx].value = choices[next].clone();
-                        if pages::plugins::apply_plugin_fields(
-                            &mut self.config,
-                            self.plugins.state.selected().unwrap_or(0),
-                            &updated,
-                        ).is_ok() {
-                            self.dirty = true;
-                            self.plugins.edit_buffer = choices[next].clone();
-                        }
-                    } else {
-                        // Apply text value then jump to next field (continuous edit).
-                        let value = self.plugins.edit_buffer.clone();
-                        let mut updated = fields.clone();
-                        updated[field_idx].value = value;
-                        if pages::plugins::apply_plugin_fields(
-                            &mut self.config,
-                            self.plugins.state.selected().unwrap_or(0),
-                            &updated,
-                        ).is_ok() {
-                            self.dirty = true;
-                        }
-                        let next = (field_idx + 1).min(field_count.saturating_sub(1));
-                        self.plugins.edit_field = next;
-                        self.plugins.edit_buffer =
-                            self.plugins.current_fields(&self.config)
-                                .get(next)
-                                .map(|f| f.value.clone())
-                                .unwrap_or_default();
-                    }
-                    AppEvent::None
-                }
-                KeyCode::Left if {
-                    let fields = self.plugins.current_fields(&self.config);
-                    field_idx < fields.len() && !fields[field_idx].choices.is_empty()
-                } => {
-                    // Cycle choices backward.
-                    let fields = self.plugins.current_fields(&self.config);
-                    let choices = &fields[field_idx].choices;
-                    let current_index = choices.iter().position(|c| c == &fields[field_idx].value).unwrap_or(0);
-                    let prev = (current_index + choices.len() - 1) % choices.len();
+                    let direction = if code == KeyCode::Right { 1 } else { -1 };
                     let mut updated = fields.clone();
-                    updated[field_idx].value = choices[prev].clone();
+                    if !current.choices.is_empty() {
+                        let current_index = current.choices.iter().position(|x| x == &current.value).unwrap_or(0);
+                        let len = current.choices.len() as isize;
+                        let next = (current_index as isize + direction + len) % len;
+                        updated[field_idx].value = current.choices[next as usize].clone();
+                    } else if current.is_bool {
+                        updated[field_idx].value = (!pages::plugins::parse_bool_field(&current.value).unwrap_or(false)).to_string();
+                    } else {
+                        return AppEvent::None;
+                    }
                     if pages::plugins::apply_plugin_fields(
                         &mut self.config,
                         self.plugins.state.selected().unwrap_or(0),
                         &updated,
                     ).is_ok() {
                         self.dirty = true;
-                        self.plugins.edit_buffer = choices[prev].clone();
+                        self.plugins.edit_buffer = updated[field_idx].value.clone();
+                        self.plugins.error_msg = None;
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let fields = self.plugins.current_fields(&self.config);
+                    if field_idx >= fields.len() { return AppEvent::None; }
+                    let current = &fields[field_idx];
+                    let mut updated = fields.clone();
+                    if current.is_bool || !current.choices.is_empty() {
+                        // Value already applied via ←/→; just move to next field.
+                        let next = (field_idx + 1).min(field_count.saturating_sub(1));
+                        self.plugins.edit_field = next;
+                        self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
+                            .get(next).map(|f| f.value.clone()).unwrap_or_default();
+                        return AppEvent::None;
+                    }
+                    updated[field_idx].value = self.plugins.edit_buffer.clone();
+                    if pages::plugins::apply_plugin_fields(
+                        &mut self.config,
+                        self.plugins.state.selected().unwrap_or(0),
+                        &updated,
+                    ).is_ok() {
+                        self.dirty = true;
+                        self.plugins.error_msg = None;
+                        let next = (field_idx + 1).min(field_count.saturating_sub(1));
+                        self.plugins.edit_field = next;
+                        self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
+                            .get(next).map(|f| f.value.clone()).unwrap_or_default();
+                    } else {
+                        self.plugins.error_msg = Some(t("Invalid value for this field", "该字段的值无效"));
                     }
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
                     self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
-                        .get(self.plugins.edit_field)
-                        .map(|f| f.value.clone())
-                        .unwrap_or_default();
+                        .get(self.plugins.edit_field).map(|f| f.value.clone()).unwrap_or_default();
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
                     self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
                     self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
-                        .get(self.plugins.edit_field)
-                        .map(|f| f.value.clone())
-                        .unwrap_or_default();
+                        .get(self.plugins.edit_field).map(|f| f.value.clone()).unwrap_or_default();
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1787,11 +1837,11 @@ impl<'a> App<'a> {
                     self.plugins.editing = false;
                     return AppEvent::None;
                 }
-                // Load first field value into edit buffer for quick editing
-                let fields = pages::plugins::plugin_fields(&self.config, i);
+                // Enter field overview of the selected plugin.
+                self.plugins.viewing = true;
                 self.plugins.edit_field = 0;
-                self.plugins.edit_buffer = fields.first().map(|f| f.value.clone()).unwrap_or_default();
-                self.plugins.editing = true;
+                self.plugins.edit_buffer.clear();
+                self.plugins.error_msg = None;
                 AppEvent::None
             }
             _ => AppEvent::None,
@@ -1891,18 +1941,19 @@ impl<'a> App<'a> {
 
     fn handle_platforms_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
+        let selected = self.platforms.state.selected().unwrap_or(0);
 
+        // ── Inline edit mode ───────────────────────────────────────────
         if self.platforms.editing {
-            let selected = self.platforms.state.selected().unwrap_or(0);
-            let field_count =
-                pages::platforms::platform_fields(&self.config, selected).len();
+            let field_count = pages::platforms::platform_fields(&self.config, selected).len();
             return match code {
                 KeyCode::Esc => {
                     self.platforms.editing = false;
                     self.platforms.edit_buffer.clear();
+                    self.platforms.error_msg = None;
                     AppEvent::None
                 }
-                KeyCode::Char(' ')
+                KeyCode::Right | KeyCode::Left
                     if pages::platforms::platform_field_is_bool(&self.config, selected, self.platforms.edit_field) =>
                 {
                     let field = self.platforms.edit_field;
@@ -1912,41 +1963,47 @@ impl<'a> App<'a> {
                         self.dirty = true;
                         self.platforms.edit_buffer =
                             pages::platforms::platform_field_value(&self.config, selected, field);
+                        self.platforms.error_msg = None;
                     }
                     AppEvent::None
                 }
                 KeyCode::Enter => {
                     let field = self.platforms.edit_field.min(field_count.saturating_sub(1));
-                    let value = self.platforms.edit_buffer.clone();
-                    if pages::platforms::apply_platform_field(
-                        &mut self.config,
-                        selected,
-                        field,
-                        &value,
-                    ) {
-                        self.dirty = true;
+                    let is_bool = pages::platforms::platform_field_is_bool(&self.config, selected, field);
+                    if is_bool {
+                        // Value already applied via ←/→; just move to next field.
+                        let next = (field + 1).min(field_count.saturating_sub(1));
+                        self.platforms.edit_field = next;
+                        self.platforms.edit_buffer =
+                            pages::platforms::platform_field_value(&self.config, selected, next);
+                        return AppEvent::None;
                     }
-                    // Continuous edit: jump to next field instead of exiting.
-                    let next = (field + 1).min(field_count.saturating_sub(1));
-                    self.platforms.edit_field = next;
-                    self.platforms.edit_buffer =
-                        pages::platforms::platform_field_value(&self.config, selected, next);
+                    let value = self.platforms.edit_buffer.clone();
+                    if pages::platforms::apply_platform_field(&mut self.config, selected, field, &value) {
+                        self.dirty = true;
+                        self.platforms.error_msg = None;
+                        // Continuous edit: jump to next field.
+                        let next = (field + 1).min(field_count.saturating_sub(1));
+                        self.platforms.edit_field = next;
+                        self.platforms.edit_buffer =
+                            pages::platforms::platform_field_value(&self.config, selected, next);
+                    } else {
+                        self.platforms.error_msg = Some(t("Invalid value for this field", "该字段的值无效"));
+                    }
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    self.platforms.edit_field =
-                        self.platforms.edit_field.saturating_sub(1);
-                    // Reload buffer with new field's current value (B1 fix).
+                    self.platforms.edit_field = self.platforms.edit_field.saturating_sub(1);
                     self.platforms.edit_buffer =
                         pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
+                    self.platforms.error_msg = None;
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
-                    self.platforms.edit_field =
-                        (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
-                    // Reload buffer with new field's current value (B1 fix).
+                    self.platforms.edit_field = (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
                     self.platforms.edit_buffer =
                         pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
+                    self.platforms.error_msg = None;
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1961,6 +2018,41 @@ impl<'a> App<'a> {
             };
         }
 
+        // ── Field overview mode ────────────────────────────────────────
+        if self.platforms.viewing {
+            let field_count = pages::platforms::platform_field_rows(&self.config, selected).len();
+            return match code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.platforms.viewing = false;
+                    self.platforms.edit_field = 0;
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    self.platforms.editing = true;
+                    self.platforms.edit_buffer = pages::platforms::platform_field_value(
+                        &self.config, selected, self.platforms.edit_field,
+                    );
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.platforms.edit_field = self.platforms.edit_field.saturating_sub(1);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.platforms.edit_field = (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
+                    AppEvent::None
+                }
+                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    if let Some(next) = pages::nav_index(code, self.platforms.edit_field, field_count) {
+                        self.platforms.edit_field = next;
+                    }
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── Platform list mode ─────────────────────────────────────────
         match code {
             KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1988,13 +2080,10 @@ impl<'a> App<'a> {
                 AppEvent::None
             }
             KeyCode::Enter => {
-                let selected = self.platforms.state.selected().unwrap_or(0);
-                // QQ: start from field 0 (enabled). Others: start from field 1 (skip enabled,
-                // since Space already toggles it in list mode).
-                self.platforms.edit_field = if selected == 0 { 0 } else { 1 };
-                self.platforms.edit_buffer =
-                    pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
-                self.platforms.editing = true;
+                self.platforms.viewing = true;
+                self.platforms.edit_field = 0;
+                self.platforms.edit_buffer.clear();
+                self.platforms.error_msg = None;
                 AppEvent::None
             }
             _ => AppEvent::None,

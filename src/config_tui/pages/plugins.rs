@@ -8,9 +8,12 @@ use ratatui::widgets::ListState;
 /// 页面状态。
 pub struct PluginsPage {
     pub state: ListState,
+    /// 字段总览模式：true 时显示选中插件的字段值列表。
+    pub viewing: bool,
     pub editing: bool,
     pub edit_field: usize,
     pub edit_buffer: String,
+    pub error_msg: Option<String>,
     /// API quota 子页
     pub quota_active: bool,
     pub quota_provider: usize, // 0=deepseek, 1=openrouter
@@ -23,13 +26,23 @@ impl PluginsPage {
         state.select(Some(0));
         Self {
             state,
+            viewing: false,
             editing: false,
             edit_field: 0,
             edit_buffer: String::new(),
+            error_msg: None,
             quota_active: false,
             quota_provider: 0,
             quota_field_idx: 0,
         }
+    }
+
+    /// 当前选中插件的字段总览行：`标签 = 显示值`。
+    pub fn field_rows(&self, config: &AppConfig) -> Vec<String> {
+        self.current_fields(config)
+            .iter()
+            .map(|f| format!("{} = {}", f.label, f.display_value()))
+            .collect()
     }
 
     /// 当前选中插件的字段列表。

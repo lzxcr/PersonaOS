@@ -4,7 +4,6 @@ use crate::config::ProviderConfig;
 use ratatui::widgets::ListState;
 
 /// 页面状态。
-#[derive(Default)]
 pub struct ProvidersPage {
     pub state: ListState,
     /// 编辑模式：true 时在内联表单编辑选中供应商字段。
@@ -13,6 +12,9 @@ pub struct ProvidersPage {
     pub edit_buffer: String,
     /// 确认删除模式。
     pub confirming_delete: bool,
+    /// 字段总览模式：true 时显示选中供应商的字段值列表。
+    pub viewing: bool,
+    pub error_msg: Option<String>,
 }
 
 impl ProvidersPage {
@@ -25,8 +27,31 @@ impl ProvidersPage {
             edit_field: 0,
             edit_buffer: String::new(),
             confirming_delete: false,
+            viewing: false,
+            error_msg: None,
         }
     }
+}
+
+/// 供应商字段总览行：`标签 = 当前值`。
+pub fn provider_field_rows(provider: &ProviderConfig) -> Vec<String> {
+    EDITABLE_FIELDS
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let value = field_value(provider, i);
+            let label = match *name {
+                "id" => "ID",
+                "display_name" => "显示名称",
+                "base_url" => "Base URL",
+                "api_key" => "API Key",
+                "default_model" => "默认模型",
+                "models" => "模型列表",
+                _ => name,
+            };
+            format!("{label} = {value}")
+        })
+        .collect()
 }
 
 /// 供应商列表行：`id  display_name  base_url  (N 模型)  [active]`。

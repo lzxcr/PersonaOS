@@ -4,12 +4,14 @@ use crate::config::AppConfig;
 use ratatui::widgets::ListState;
 
 /// 页面状态。
-#[derive(Default)]
 pub struct PlatformsPage {
     pub state: ListState,
+    /// 字段总览模式：true 时显示选中平台的字段值列表。
+    pub viewing: bool,
     pub editing: bool,
     pub edit_field: usize,
     pub edit_buffer: String,
+    pub error_msg: Option<String>,
 }
 
 impl PlatformsPage {
@@ -18,9 +20,11 @@ impl PlatformsPage {
         state.select(Some(0));
         Self {
             state,
+            viewing: false,
             editing: false,
             edit_field: 0,
             edit_buffer: String::new(),
+            error_msg: None,
         }
     }
 }
@@ -66,6 +70,18 @@ pub fn platform_rows(config: &AppConfig) -> Vec<String> {
         .map(|(i, (id, name, desc))| {
             let mark = if platform_enabled(config, i) { "✓" } else { " " };
             format!("[{mark}] {name:<18} — {desc} ({id})")
+        })
+        .collect()
+}
+
+/// 平台字段总览行：`标签 = 当前值`。
+pub fn platform_field_rows(config: &AppConfig, index: usize) -> Vec<String> {
+    let fields = platform_fields(config, index);
+    (0..fields.len())
+        .map(|i| {
+            let label = platform_field_label(index, i);
+            let value = platform_field_value(config, index, i);
+            format!("{label} = {value}")
         })
         .collect()
 }
