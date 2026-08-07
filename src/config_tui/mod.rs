@@ -84,7 +84,7 @@ impl<'a> App<'a> {
             subagent: pages::subagent::SubagentPage::default(),
             providers: pages::providers::ProvidersPage::default(),
             plugins: pages::plugins::PluginsPage::new(),
-            prompts: pages::prompts::PromptsPage::default(),
+            prompts: pages::prompts::PromptsPage::new(),
             platforms: pages::platforms::PlatformsPage::default(),
             global: pages::global::GlobalPage::default(),
         })
@@ -937,9 +937,35 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
+        // ── Creating / Renaming mode ────────────────────────────────────
+        if self.prompts.creating || self.prompts.renaming {
+            let action = if self.prompts.creating { t("Create", "新建") } else { t("Rename", "重命名") };
+            let block = Block::bordered().border_type(BorderType::Rounded)
+                .title(format!(" {action} {} ", t("persona", "人格")))
+                .title_alignment(Alignment::Center)
+                .border_style(Style::default().fg(theme.outline))
+                .style(Style::default().bg(theme.surface_bg));
+
+            let layout = Layout::default().direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Length(3), Constraint::Length(1)])
+                .split(inner);
+
+            let label = Line::from(format!("{}: {}", t("Name", "名称"), self.prompts.edit_buffer));
+            frame.render_widget(Paragraph::new(label), layout[0]);
+
+            let hint = Line::from(t(" Enter to confirm  Esc to cancel ", " Enter 确认  Esc 取消 "));
+            frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)), layout[1]);
+
+            let input_box = Paragraph::new(self.prompts.edit_buffer.clone())
+                .block(Block::bordered().border_type(BorderType::Rounded))
+                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
+            frame.render_widget(input_box, layout[2]);
+            return;
+        }
+
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .title(" 自定义提示词 / 人格 ")
+            .title(t("Custom prompts / Personas", "自定义提示词 / 人格"))
             .title_alignment(Alignment::Center)
             .border_style(Style::default().fg(theme.outline))
             .style(Style::default().bg(theme.surface_bg));
@@ -956,14 +982,18 @@ impl<'a> App<'a> {
             ])
             .split(inner);
 
-        let hint = Line::from(" ↑↓ 导航  Enter 激活所选人格  Esc 返回 ");
+        let hint = if self.prompts.confirming_delete {
+            Line::from(t(" Confirm delete? y / n ", " 确认删除? y 删除  n 取消 "))
+        } else {
+            Line::from(t(" ↑↓ Navigate  Enter Activate  n New  r Rename  d Delete  Esc Back ", " ↑↓ 导航  Enter 激活  n 新建  r 重命名  d 删除  Esc 返回 "))
+        };
         frame.render_widget(
             Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
             layout[0],
         );
 
         let items: Vec<ListItem> = if rows.is_empty() {
-            vec![ListItem::new("  （无可用人格，请在 ~/.pos/data/prompts/ 放置 .md 文件）")
+            vec![ListItem::new(t("  (No personas, press n to create)", "  （无可用人格，按 n 新建）"))
                 .style(Style::default().fg(theme.on_surface_variant))]
         } else {
             rows.iter()
@@ -986,7 +1016,12 @@ impl<'a> App<'a> {
 
         frame.render_stateful_widget(list, layout[1], &mut self.prompts.state);
 
-        let footer = Line::from(format!(" 当前: {}", if active.is_empty() { "(未激活)" } else { active }));
+        let footer_text = if active.is_empty() {
+            t("Current: (none)", "当前: (未激活)")
+        } else {
+            format!("{}: {active}", t("Current", "当前"))
+        };
+        let footer = Line::from(footer_text);
         frame.render_widget(
             Paragraph::new(footer).style(Style::default().fg(theme.on_surface_variant)),
             layout[2],
@@ -1769,6 +1804,93 @@ impl<'a> App<'a> {
     fn handle_prompts_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
 
+        // ── Creating / Renaming mode ────────────────────────────────────
+        if self.prompts.creating {
+            return match code {
+                KeyCode::Esc => {
+                    self.prompts.creating = false;
+                    self.prompts.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let name = self.prompts.edit_buffer.trim().to_string();
+                    self.prompts.creating = false;
+                    self.prompts.edit_buffer.clear();
+                    if !name.is_empty() {
+                        if let Err(e) = pages::prompts::create_persona(self.paths, &name) {
+                            // Silently fail — persona may already exist
+                            let _ = e;
+                        } else {
+                            self.config.prompt.active_persona = name;
+                            self.dirty = true;
+                        }
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Backspace => { self.prompts.edit_buffer.pop(); AppEvent::None }
+                KeyCode::Char(c) => { self.prompts.edit_buffer.push(c); AppEvent::None }
+                _ => AppEvent::None,
+            };
+        }
+
+        if self.prompts.renaming {
+            return match code {
+                KeyCode::Esc => {
+                    self.prompts.renaming = false;
+                    self.prompts.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let new_name = self.prompts.edit_buffer.trim().to_string();
+                    self.prompts.renaming = false;
+                    let rows = pages::prompts::persona_rows(self.paths, &self.config.prompt.active_persona);
+                    let old_name = self.prompts.state.selected()
+                        .and_then(|i| rows.get(i).map(|r| r.1.clone()))
+                        .unwrap_or_default();
+                    self.prompts.edit_buffer.clear();
+                    if !new_name.is_empty() && !old_name.is_empty() {
+                        if pages::prompts::rename_persona(self.paths, &old_name, &new_name).is_ok() {
+                            if self.config.prompt.active_persona == old_name {
+                                self.config.prompt.active_persona = new_name;
+                            }
+                            self.dirty = true;
+                        }
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Backspace => { self.prompts.edit_buffer.pop(); AppEvent::None }
+                KeyCode::Char(c) => { self.prompts.edit_buffer.push(c); AppEvent::None }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── Confirm delete mode ─────────────────────────────────────────
+        if self.prompts.confirming_delete {
+            return match code {
+                KeyCode::Char('y') => {
+                    let rows = pages::prompts::persona_rows(self.paths, &self.config.prompt.active_persona);
+                    let name = self.prompts.state.selected()
+                        .and_then(|i| rows.get(i).map(|r| r.1.clone()))
+                        .unwrap_or_default();
+                    if !name.is_empty() {
+                        let _ = pages::prompts::delete_persona(self.paths, &name);
+                        if self.config.prompt.active_persona == name {
+                            self.config.prompt.active_persona.clear();
+                        }
+                        self.dirty = true;
+                    }
+                    self.prompts.confirming_delete = false;
+                    AppEvent::None
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.prompts.confirming_delete = false;
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── List mode ──────────────────────────────────────────────────
         match code {
             KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1793,6 +1915,24 @@ impl<'a> App<'a> {
                         self.dirty = true;
                     }
                 }
+                AppEvent::None
+            }
+            KeyCode::Char('n') => {
+                self.prompts.creating = true;
+                self.prompts.edit_buffer.clear();
+                AppEvent::None
+            }
+            KeyCode::Char('r') => {
+                let rows = pages::prompts::persona_rows(self.paths, &self.config.prompt.active_persona);
+                let name = self.prompts.state.selected()
+                    .and_then(|i| rows.get(i).map(|r| r.1.clone()))
+                    .unwrap_or_default();
+                self.prompts.renaming = true;
+                self.prompts.edit_buffer = name;
+                AppEvent::None
+            }
+            KeyCode::Char('d') => {
+                self.prompts.confirming_delete = true;
                 AppEvent::None
             }
             _ => AppEvent::None,
