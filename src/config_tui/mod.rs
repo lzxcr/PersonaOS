@@ -174,8 +174,12 @@ impl<'a> App<'a> {
         }
 
         // ── Status bar ─────────────────────────────────────────────────
+        let help_text = match self.screen {
+            Screen::MainMenu => t(" q/Esc quit   ↑↓ navigate   Enter select ", " q/Esc 退出   ↑↓ 导航   Enter 选择 "),
+            _ => t(" Esc back  ↑↓/PgUp/PgDn navigate  Enter confirm  Space toggle ", " Esc 返回  ↑↓/翻页 导航  Enter 确认  空格 切换 "),
+        };
         let help = Span::styled(
-            " q/Esc 退出   ↑↓ 导航   Enter 选择 ",
+            help_text,
             Style::default()
                 .fg(theme.surface_dim_fg)
                 .bg(theme.surface_dim_bg),
@@ -213,15 +217,15 @@ impl<'a> App<'a> {
         let multimodal = active_multimodal_label(&self.config);
 
         let items: Vec<ListItem> = vec![
-            format!(" {} ({})", t("Text model", "文本模型"), active),
-            format!(" {} ({})", t("Multimodal model", "多模态模型"), multimodal),
-            format!(" {} ({})", t("Subagent tier pools", "子代理档位池"), subagent_tiers_label(&self.config)),
-            format!(" {}", t("Providers and models", "供应商和模型")),
-            format!(" {}", t("Plugins", "插件配置")),
-            format!(" {}", t("Custom prompts", "自定义提示词")),
-            format!(" {} ({})", t("IM Platforms", "IM 平台"), platforms_label(&self.config)),
-            format!(" {}", t("Global settings", "全局参数设置")),
-            format!(" {}", t("Save and quit", "保存并退出")),
+            format!("  ✨  {} ({})", t("Text model", "文本模型"), active),
+            format!("  🖼  {} ({})", t("Multimodal model", "多模态模型"), multimodal),
+            format!("  ⚙  {} ({})", t("Subagent tier pools", "子代理档位池"), subagent_tiers_label(&self.config)),
+            format!("  🏭  {}", t("Providers and models", "供应商和模型")),
+            format!("  🔌  {}", t("Plugins", "插件配置")),
+            format!("  👤  {}", t("Custom prompts", "自定义提示词")),
+            format!("  💬  {} ({})", t("IM Platforms", "IM 平台"), platforms_label(&self.config)),
+            format!("  🎛  {}", t("Global settings", "全局参数设置")),
+            format!("  💾  {}", t("Save and quit", "保存并退出")),
         ]
         .into_iter()
         .map(|s| ListItem::new(s).style(Style::default().fg(theme.on_surface)))
@@ -242,7 +246,7 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, centered[1], &mut self.main_menu_state);
     }
@@ -379,7 +383,7 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[2], &mut self.subagent.state);
     }
@@ -514,11 +518,20 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.providers.state);
 
-        let footer = Line::from(format!(" 当前: {}", self.config.active_provider));
+        let pos = pages::position_label(
+            self.providers.state.selected().unwrap_or(0),
+            self.config.providers.len(),
+        );
+        let footer = Line::from(format!(
+            " {}  {} | {}",
+            pages::t("Current", "当前"),
+            self.config.active_provider,
+            pos
+        ));
         frame.render_widget(
             Paragraph::new(footer).style(Style::default().fg(theme.on_surface_variant)),
             layout[2],
@@ -561,9 +574,21 @@ impl<'a> App<'a> {
             ]);
             frame.render_widget(Paragraph::new(label_line), layout[0]);
 
-            let hint = Line::from(" 输入新值后按 Enter 应用  ↑↓ 切换字段  Esc 返回 ");
+            let hint = if let Some(error) = &self.global.error_msg {
+                Line::from(format!(" ⚠ {error}"))
+            } else {
+                Line::from(t(
+                    " Type new value, Enter apply  ↑↓ field  Space toggle  Esc back ",
+                    " 输入新值 Enter 应用  ↑↓ 切换字段  空格 切换  Esc 返回 ",
+                ))
+            };
+            let hint_style = if self.global.error_msg.is_some() {
+                Style::default().fg(theme.error_fg).bg(theme.error_bg).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.on_surface_variant)
+            };
             frame.render_widget(
-                Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+                Paragraph::new(hint).style(hint_style),
                 layout[1],
             );
 
@@ -572,13 +597,33 @@ impl<'a> App<'a> {
                 .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
             frame.render_widget(input_box, layout[2]);
 
-            let help_line = Line::from(format!(
-                " 字段 {} / {}  (bool: true/false)",
-                self.global.state.selected().unwrap_or(0) + 1,
-                pages::global::GLOBAL_FIELDS.len()
-            ));
+            let field_idx = self.global.state.selected().unwrap_or(0);
+            let choices = pages::global::field_choices(field_idx);
+            let help_text = if !choices.is_empty() {
+                format!(
+                    " {} {}/{}  [{}]",
+                    t("Field", "字段"),
+                    field_idx + 1,
+                    pages::global::GLOBAL_FIELDS.len(),
+                    choices.join(" / ")
+                )
+            } else if pages::global::is_bool_field(field_idx) {
+                format!(
+                    " {} {}/{}  (Space toggle)",
+                    t("Field", "字段"),
+                    field_idx + 1,
+                    pages::global::GLOBAL_FIELDS.len()
+                )
+            } else {
+                format!(
+                    " {} {}/{}",
+                    t("Field", "字段"),
+                    field_idx + 1,
+                    pages::global::GLOBAL_FIELDS.len()
+                )
+            };
             frame.render_widget(
-                Paragraph::new(help_line).style(Style::default().fg(theme.on_surface_variant)),
+                Paragraph::new(Line::from(help_text)).style(Style::default().fg(theme.on_surface_variant)),
                 layout[3],
             );
             return;
@@ -624,7 +669,7 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.global.state);
     }
@@ -671,11 +716,20 @@ impl<'a> App<'a> {
             frame.render_widget(Paragraph::new(label_line), layout[0]);
 
             let hint_text = if field.is_bool {
-                t(" Enter/Space to toggle  ↑↓ switch field  Esc back ", " Enter/空格 切换  ↑↓ 切换字段  Esc 返回 ")
+                t(" Enter/Space toggle  ↑↓ field  Esc back ", " Enter/空格 切换  ↑↓ 切换字段  Esc 返回 ")
             } else if !field.choices.is_empty() {
-                t(" Enter to pick from choices  ↑↓ switch field  Esc back ", " Enter 从选项中选择  ↑↓ 切换字段  Esc 返回 ")
+                let mut opts: Vec<String> = field.choices.iter().map(|c| {
+                    if c == &field.value {
+                        format!("▶ {c}")
+                    } else {
+                        format!("  {c}")
+                    }
+                }).collect();
+                let marker = format!(" {} → / {} ←", t("next", "下一个"), t("prev", "上一个"));
+                opts.push(marker);
+                opts.join(" | ")
             } else {
-                t(" Enter to edit  ↑↓ switch field  Esc back ", " Enter 编辑  ↑↓ 切换字段  Esc 返回 ")
+                t(" Enter apply & next  ↑↓ field  Esc back ", " Enter 应用并下一个  ↑↓ 切换字段  Esc 返回 ")
             };
             frame.render_widget(
                 Paragraph::new(Line::from(hint_text)).style(Style::default().fg(theme.on_surface_variant)),
@@ -736,7 +790,7 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.plugins.state);
     }
@@ -803,7 +857,7 @@ impl<'a> App<'a> {
             .block(Block::bordered().border_type(BorderType::Rounded).title(format!(" {provider} ")).title_alignment(Alignment::Center)
                 .border_style(Style::default().fg(theme.outline)).style(Style::default().bg(theme.surface_bg)))
             .highlight_style(Style::default().fg(theme.primary_fg).bg(theme.primary_container_bg).add_modifier(Modifier::BOLD))
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         let mut state = self.plugins.state.clone();
         state.select(Some(account_idx));
@@ -958,7 +1012,7 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.platforms.state);
     }
@@ -1040,14 +1094,14 @@ impl<'a> App<'a> {
                     .bg(theme.primary_container_bg)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▸ ");
+            .highlight_symbol(" ▌ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.prompts.state);
 
         let footer_text = if active.is_empty() {
-            t("Current: (none)", "当前: (未激活)")
+            format!("{} {}", t("Current: (none)", "当前: (未激活)"), pages::position_label(self.prompts.state.selected().unwrap_or(0), rows.len()))
         } else {
-            format!("{}: {active}", t("Current", "当前"))
+            format!("{}: {} | {}", t("Current", "当前"), active, pages::position_label(self.prompts.state.selected().unwrap_or(0), rows.len()))
         };
         let footer = Line::from(footer_text);
         frame.render_widget(
@@ -1073,16 +1127,14 @@ impl<'a> App<'a> {
                     KeyCode::Char('q') | KeyCode::Esc => {
                         return Ok(Some(AppEvent::Quit));
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up | KeyCode::Char('k')
+                    | KeyCode::Down | KeyCode::Char('j')
+                    | KeyCode::PageUp | KeyCode::PageDown
+                    | KeyCode::Home | KeyCode::End => {
                         let i = self.main_menu_state.selected().unwrap_or(0);
-                        self.main_menu_state
-                            .select(Some(i.saturating_sub(1)));
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        let i = self.main_menu_state.selected().unwrap_or(0);
-                        self.main_menu_state.select(Some(
-                            (i + 1).min(MAIN_MENU_ITEMS - 1),
-                        ));
+                        if let Some(next) = pages::nav_index(code, i, MAIN_MENU_ITEMS) {
+                            self.main_menu_state.select(Some(next));
+                        }
                     }
                     KeyCode::Enter => {
                         let i = self.main_menu_state.selected().unwrap_or(0);
@@ -1332,9 +1384,10 @@ impl<'a> App<'a> {
                             self.dirty = true;
                         }
                     }
-                    // 若编辑的是 id，保持选中位置。
-                    self.providers.editing = false;
-                    self.providers.edit_buffer.clear();
+                    // Continuous edit: jump to next field.
+                    self.providers.edit_field = (field + 1)
+                        .min(pages::providers::EDITABLE_FIELDS.len() - 1);
+                    self.reload_provider_edit_buffer();
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -1405,6 +1458,13 @@ impl<'a> App<'a> {
                 let i = self.providers.state.selected().unwrap_or(0);
                 let next = (i + 1).min(self.config.providers.len().saturating_sub(1));
                 self.providers.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                let i = self.providers.state.selected().unwrap_or(0);
+                if let Some(next) = pages::nav_index(code, i, self.config.providers.len()) {
+                    self.providers.state.select(Some(next));
+                }
                 AppEvent::None
             }
             KeyCode::Enter => {
@@ -1482,16 +1542,78 @@ impl<'a> App<'a> {
                 KeyCode::Esc => {
                     self.global.editing = false;
                     self.global.edit_buffer.clear();
+                    self.global.error_msg = None;
+                    AppEvent::None
+                }
+                KeyCode::Char(' ') if pages::global::is_bool_field(self.global.state.selected().unwrap_or(0)) => {
+                    let field = self.global.state.selected().unwrap_or(0);
+                    let current = self.global.edit_buffer.parse::<bool>().unwrap_or(false);
+                    let new_val = (!current).to_string();
+                    if pages::global::apply_field(&mut self.config, field, &new_val) {
+                        self.dirty = true;
+                        self.global.edit_buffer = new_val;
+                        self.global.error_msg = None;
+                    }
                     AppEvent::None
                 }
                 KeyCode::Enter => {
                     let field = self.global.state.selected().unwrap_or(0);
+                    // Choices: cycle forward instead of applying text.
+                    let choices = pages::global::field_choices(field);
+                    if !choices.is_empty() {
+                        let current_index = choices
+                            .iter()
+                            .position(|c| c == &self.global.edit_buffer)
+                            .unwrap_or(0);
+                        let next = (current_index + 1) % choices.len();
+                        let value = choices[next].to_string();
+                        if pages::global::apply_field(&mut self.config, field, &value) {
+                            self.dirty = true;
+                            self.global.edit_buffer = value;
+                            self.global.error_msg = None;
+                        }
+                        return AppEvent::None;
+                    }
                     let value = self.global.edit_buffer.clone();
                     if pages::global::apply_field(&mut self.config, field, &value) {
                         self.dirty = true;
+                        self.global.error_msg = None;
+                        // Continuous edit: jump to next field.
+                        let next = (field + 1).min(pages::global::GLOBAL_FIELDS.len() - 1);
+                        self.global.state.select(Some(next));
+                        self.global.edit_buffer = pages::global::field_value(&self.config, next);
+                    } else {
+                        self.global.error_msg = Some(t("Invalid value for this field", "该字段的值无效"));
                     }
-                    self.global.editing = false;
-                    self.global.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Left if !pages::global::field_choices(self.global.state.selected().unwrap_or(0)).is_empty() => {
+                    let field = self.global.state.selected().unwrap_or(0);
+                    let choices = pages::global::field_choices(field);
+                    let current_index = choices
+                        .iter()
+                        .position(|c| c == &self.global.edit_buffer)
+                        .unwrap_or(0);
+                    let prev = (current_index + choices.len() - 1) % choices.len();
+                    let value = choices[prev].to_string();
+                    if pages::global::apply_field(&mut self.config, field, &value) {
+                        self.dirty = true;
+                        self.global.edit_buffer = value;
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    let field = self.global.state.selected().unwrap_or(0);
+                    let prev = field.saturating_sub(1);
+                    self.global.state.select(Some(prev));
+                    self.global.edit_buffer = pages::global::field_value(&self.config, prev);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    let field = self.global.state.selected().unwrap_or(0);
+                    let next = (field + 1).min(pages::global::GLOBAL_FIELDS.len() - 1);
+                    self.global.state.select(Some(next));
+                    self.global.edit_buffer = pages::global::field_value(&self.config, next);
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1519,6 +1641,13 @@ impl<'a> App<'a> {
                 self.global.state.select(Some(next));
                 AppEvent::None
             }
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                let i = self.global.state.selected().unwrap_or(0);
+                if let Some(next) = pages::nav_index(code, i, pages::global::GLOBAL_FIELDS.len()) {
+                    self.global.state.select(Some(next));
+                }
+                AppEvent::None
+            }
             KeyCode::Enter => {
                 let field = self.global.state.selected().unwrap_or(0);
                 self.global.edit_buffer =
@@ -1540,10 +1669,8 @@ impl<'a> App<'a> {
 
         // ── Detail edit mode ────────────────────────────────────────────
         if self.plugins.editing {
-            let mut fields = self.plugins.current_fields(&self.config);
-            let field_count = fields.len();
+            let field_count = self.plugins.current_fields(&self.config).len();
             let field_idx = self.plugins.edit_field.min(field_count.saturating_sub(1));
-            let current = if field_idx < fields.len() { &fields[field_idx] } else { return AppEvent::Back; };
 
             return match code {
                 KeyCode::Esc => {
@@ -1551,57 +1678,95 @@ impl<'a> App<'a> {
                     self.plugins.edit_buffer.clear();
                     AppEvent::None
                 }
-                KeyCode::Enter | KeyCode::Char(' ') if current.is_bool => {
-                    // Toggle boolean field
-                    fields[field_idx].value = (!pages::plugins::parse_bool_field(&current.value).unwrap_or(false)).to_string();
-                    let saved = pages::plugins::apply_plugin_fields(
-                        &mut self.config,
-                        self.plugins.state.selected().unwrap_or(0),
-                        &fields,
-                    );
-                    if saved.is_ok() { self.dirty = true; }
-                    AppEvent::None
-                }
-                KeyCode::Enter if !current.choices.is_empty() => {
-                    // Pick choice
-                    let choices = &current.choices;
-                    if !choices.is_empty() {
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    let fields = self.plugins.current_fields(&self.config);
+                    let field_idx = field_idx.min(fields.len().saturating_sub(1));
+                    let current = &fields[field_idx];
+                    if current.is_bool {
+                        // Toggle boolean field.
+                        let mut updated = fields.clone();
+                        updated[field_idx].value =
+                            (!pages::plugins::parse_bool_field(&current.value).unwrap_or(false)).to_string();
+                        if pages::plugins::apply_plugin_fields(
+                            &mut self.config,
+                            self.plugins.state.selected().unwrap_or(0),
+                            &updated,
+                        ).is_ok() {
+                            self.dirty = true;
+                            self.plugins.edit_buffer = updated[field_idx].value.clone();
+                        }
+                    } else if !current.choices.is_empty() {
+                        // Cycle choices forward.
+                        let choices = &current.choices;
                         let current_index = choices.iter().position(|c| c == &current.value).unwrap_or(0);
                         let next = (current_index + 1) % choices.len();
                         let mut updated = fields.clone();
                         updated[field_idx].value = choices[next].clone();
-                        let saved = pages::plugins::apply_plugin_fields(
+                        if pages::plugins::apply_plugin_fields(
                             &mut self.config,
                             self.plugins.state.selected().unwrap_or(0),
                             &updated,
-                        );
-                        if saved.is_ok() { self.dirty = true; self.plugins.edit_buffer.clear(); }
+                        ).is_ok() {
+                            self.dirty = true;
+                            self.plugins.edit_buffer = choices[next].clone();
+                        }
+                    } else {
+                        // Apply text value then jump to next field (continuous edit).
+                        let value = self.plugins.edit_buffer.clone();
+                        let mut updated = fields.clone();
+                        updated[field_idx].value = value;
+                        if pages::plugins::apply_plugin_fields(
+                            &mut self.config,
+                            self.plugins.state.selected().unwrap_or(0),
+                            &updated,
+                        ).is_ok() {
+                            self.dirty = true;
+                        }
+                        let next = (field_idx + 1).min(field_count.saturating_sub(1));
+                        self.plugins.edit_field = next;
+                        self.plugins.edit_buffer =
+                            self.plugins.current_fields(&self.config)
+                                .get(next)
+                                .map(|f| f.value.clone())
+                                .unwrap_or_default();
                     }
                     AppEvent::None
                 }
-                KeyCode::Enter => {
-                    let value = self.plugins.edit_buffer.clone();
+                KeyCode::Left if {
+                    let fields = self.plugins.current_fields(&self.config);
+                    field_idx < fields.len() && !fields[field_idx].choices.is_empty()
+                } => {
+                    // Cycle choices backward.
+                    let fields = self.plugins.current_fields(&self.config);
+                    let choices = &fields[field_idx].choices;
+                    let current_index = choices.iter().position(|c| c == &fields[field_idx].value).unwrap_or(0);
+                    let prev = (current_index + choices.len() - 1) % choices.len();
                     let mut updated = fields.clone();
-                    updated[field_idx].value = value;
-                    let saved = pages::plugins::apply_plugin_fields(
+                    updated[field_idx].value = choices[prev].clone();
+                    if pages::plugins::apply_plugin_fields(
                         &mut self.config,
                         self.plugins.state.selected().unwrap_or(0),
                         &updated,
-                    );
-                    if saved.is_ok() {
+                    ).is_ok() {
                         self.dirty = true;
+                        self.plugins.edit_buffer = choices[prev].clone();
                     }
-                    self.plugins.edit_buffer.clear();
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
-                    self.plugins.edit_buffer.clear();
+                    self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
+                        .get(self.plugins.edit_field)
+                        .map(|f| f.value.clone())
+                        .unwrap_or_default();
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
                     self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
-                    self.plugins.edit_buffer.clear();
+                    self.plugins.edit_buffer = self.plugins.current_fields(&self.config)
+                        .get(self.plugins.edit_field)
+                        .map(|f| f.value.clone())
+                        .unwrap_or_default();
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1628,6 +1793,13 @@ impl<'a> App<'a> {
                 let i = self.plugins.state.selected().unwrap_or(0);
                 let next = (i + 1).min(pages::plugins::plugins().len() - 1);
                 self.plugins.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                let i = self.plugins.state.selected().unwrap_or(0);
+                if let Some(next) = pages::nav_index(code, i, pages::plugins::plugins().len()) {
+                    self.plugins.state.select(Some(next));
+                }
                 AppEvent::None
             }
             KeyCode::Char(' ') => {
@@ -1816,18 +1988,27 @@ impl<'a> App<'a> {
                     ) {
                         self.dirty = true;
                     }
-                    self.platforms.editing = false;
-                    self.platforms.edit_buffer.clear();
+                    // Continuous edit: jump to next field instead of exiting.
+                    let next = (field + 1).min(field_count.saturating_sub(1));
+                    self.platforms.edit_field = next;
+                    self.platforms.edit_buffer =
+                        pages::platforms::platform_field_value(&self.config, selected, next);
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.platforms.edit_field =
                         self.platforms.edit_field.saturating_sub(1);
+                    // Reload buffer with new field's current value (B1 fix).
+                    self.platforms.edit_buffer =
+                        pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
                     self.platforms.edit_field =
                         (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
+                    // Reload buffer with new field's current value (B1 fix).
+                    self.platforms.edit_buffer =
+                        pages::platforms::platform_field_value(&self.config, selected, self.platforms.edit_field);
                     AppEvent::None
                 }
                 KeyCode::Backspace => {
@@ -1853,6 +2034,13 @@ impl<'a> App<'a> {
                 let i = self.platforms.state.selected().unwrap_or(0);
                 let next = (i + 1).min(pages::platforms::PLATFORMS.len() - 1);
                 self.platforms.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                let i = self.platforms.state.selected().unwrap_or(0);
+                if let Some(next) = pages::nav_index(code, i, pages::platforms::PLATFORMS.len()) {
+                    self.platforms.state.select(Some(next));
+                }
                 AppEvent::None
             }
             KeyCode::Char(' ') => {
@@ -1983,6 +2171,15 @@ impl<'a> App<'a> {
                 let i = self.prompts.state.selected().unwrap_or(0);
                 let next = (i + 1).min(rows.len().saturating_sub(1));
                 self.prompts.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                let rows =
+                    pages::prompts::persona_rows(self.paths, &self.config.prompt.active_persona);
+                let i = self.prompts.state.selected().unwrap_or(0);
+                if let Some(next) = pages::nav_index(code, i, rows.len()) {
+                    self.prompts.state.select(Some(next));
+                }
                 AppEvent::None
             }
             KeyCode::Enter => {
@@ -2145,7 +2342,7 @@ fn draw_model_select(
                 .bg(theme.primary_container_bg)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol(" ▸ ");
+        .highlight_symbol(" ▌ ");
 
     frame.render_stateful_widget(list, layout[2], state);
 

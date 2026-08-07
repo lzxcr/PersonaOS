@@ -10,6 +10,8 @@ pub struct GlobalPage {
     /// 编辑模式：true 时在底部输入框输入新值。
     pub editing: bool,
     pub edit_buffer: String,
+    /// 最近一次校验失败的提示（红色显示）。
+    pub error_msg: Option<String>,
 }
 
 impl GlobalPage {
@@ -20,6 +22,7 @@ impl GlobalPage {
             state,
             editing: false,
             edit_buffer: String::new(),
+            error_msg: None,
         }
     }
 }
@@ -61,6 +64,31 @@ pub const GLOBAL_FIELDS: [&str; 14] = [
     "display.show_token_usage",
     "display.mixed_model_endpoint_display",
 ];
+
+/// 判断字段是否为布尔类型。
+pub fn is_bool_field(field: usize) -> bool {
+    matches!(
+        GLOBAL_FIELDS[field.min(GLOBAL_FIELDS.len() - 1)],
+        "tools.enabled"
+            | "tools.persist_loaded_tools"
+            | "skills.enabled"
+            | "skills.allow_command_execution"
+            | "display.readable_tool_names"
+            | "display.show_token_usage"
+    )
+}
+
+/// 返回字段的合法选项（非空表示 choices 字段）。
+pub fn field_choices(field: usize) -> &'static [&'static str] {
+    match GLOBAL_FIELDS[field.min(GLOBAL_FIELDS.len() - 1)] {
+        "tools.loading_mode" => &["full", "hybrid", "stub"],
+        "display.language" => &["auto", "en", "zh"],
+        "display.reasoning" => &["summary", "full", "hidden"],
+        "display.tool_calls" => &["summary", "full", "hidden"],
+        "display.mixed_model_endpoint_display" => &["hidden", "append", "replace"],
+        _ => &[],
+    }
+}
 
 /// 读取字段当前值。
 pub fn field_value(config: &AppConfig, field: usize) -> String {

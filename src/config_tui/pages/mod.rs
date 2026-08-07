@@ -32,6 +32,33 @@ pub fn scroll_offset(selected: usize, visible: usize, total: usize) -> usize {
     selected.saturating_sub(visible.saturating_sub(1)).min(max_scroll)
 }
 
+/// 计算翻页/跳转后的目标索引。
+/// 返回 Some(new_index) 表示位置变化，None 表示无效键。
+pub fn nav_index(code: crossterm::event::KeyCode, current: usize, count: usize) -> Option<usize> {
+    use crossterm::event::KeyCode;
+    if count == 0 {
+        return None;
+    }
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => Some(current.saturating_sub(1)),
+        KeyCode::Down | KeyCode::Char('j') => Some((current + 1).min(count - 1)),
+        KeyCode::PageUp => Some(current.saturating_sub(10)),
+        KeyCode::PageDown => Some((current + 10).min(count - 1)),
+        KeyCode::Home => Some(0),
+        KeyCode::End => Some(count - 1),
+        _ => None,
+    }
+}
+
+/// 列表位置指示文本："第 X/N 项"。
+pub fn position_label(current: usize, count: usize) -> String {
+    if count == 0 {
+        "0/0".to_string()
+    } else {
+        format!("{}/{}", current + 1, count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,5 +84,23 @@ mod tests {
         let a = PageAction::Back;
         let b = a;
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn nav_index_handles_jumps() {
+        use crossterm::event::KeyCode;
+        assert_eq!(nav_index(KeyCode::Down, 0, 10), Some(1));
+        assert_eq!(nav_index(KeyCode::PageDown, 0, 10), Some(9));
+        assert_eq!(nav_index(KeyCode::PageUp, 1, 10), Some(0));
+        assert_eq!(nav_index(KeyCode::Home, 5, 10), Some(0));
+        assert_eq!(nav_index(KeyCode::End, 5, 10), Some(9));
+        assert_eq!(nav_index(KeyCode::PageDown, 0, 0), None);
+        assert_eq!(nav_index(KeyCode::Char('x'), 5, 10), None);
+    }
+
+    #[test]
+    fn position_label_formats() {
+        assert_eq!(position_label(0, 14), "1/14");
+        assert_eq!(position_label(0, 0), "0/0");
     }
 }
