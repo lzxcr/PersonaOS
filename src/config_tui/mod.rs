@@ -164,6 +164,7 @@ impl<'a> App<'a> {
             Screen::Providers => self.draw_providers(frame, main_area, &theme),
             Screen::GlobalSettings => self.draw_global(frame, main_area, &theme),
             Screen::Plugins => self.draw_plugins(frame, main_area, &theme),
+            Screen::Platforms => self.draw_platforms(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
             _ => self.draw_placeholder(frame, main_area, &theme),
         }
@@ -677,6 +678,113 @@ impl<'a> App<'a> {
         frame.render_stateful_widget(list, layout[1], &mut self.plugins.state);
     }
 
+    fn draw_platforms(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let inner = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3),
+        };
+
+        // ── Edit mode: field form ──────────────────────────────────────
+        if self.platforms.editing {
+            let selected = self.platforms.state.selected().unwrap_or(0);
+            let fields = pages::platforms::platform_fields(&self.config, selected);
+            let field_idx = self
+                .platforms
+                .edit_field
+                .min(fields.len().saturating_sub(1));
+            let field_name = fields
+                .get(field_idx)
+                .map(|f| f.split('=').next().unwrap_or(f).trim().to_string())
+                .unwrap_or_default();
+            let value = pages::platforms::platform_field_value(
+                &self.config,
+                selected,
+                field_idx,
+            );
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            let label_line = Line::from(vec![
+                Span::styled(
+                    format!(" {field_name} "),
+                    Style::default()
+                        .fg(theme.primary_fg)
+                        .bg(theme.primary_container_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" 当前: {value}")),
+            ]);
+            frame.render_widget(Paragraph::new(label_line), layout[0]);
+
+            let hint = Line::from(" 输入新值后按 Enter 应用  ↑↓ 切换字段  Esc 返回 ");
+            frame.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+                layout[1],
+            );
+
+            let input_box = Paragraph::new(self.platforms.edit_buffer.clone())
+                .block(Block::bordered().border_type(BorderType::Rounded))
+                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
+            frame.render_widget(input_box, layout[2]);
+            return;
+        }
+
+        // ── List mode ──────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" IM 平台 ")
+            .title_alignment(Alignment::Center)
+            .border_style(Style::default().fg(theme.outline))
+            .style(Style::default().bg(theme.surface_bg));
+
+        let rows = pages::platforms::platform_rows(&self.config);
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let hint = Line::from(" ↑↓ 导航  空格 启用/禁用  Enter 编辑字段  Esc 返回 ");
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[0],
+        );
+
+        let items: Vec<ListItem> = rows
+            .iter()
+            .map(|row| {
+                ListItem::new(Line::from(format!(" {row}")))
+                    .style(Style::default().fg(theme.on_surface))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" ▸ ");
+
+        frame.render_stateful_widget(list, layout[1], &mut self.platforms.state);
+    }
+
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -740,6 +848,7 @@ impl<'a> App<'a> {
                 Screen::Providers => return Ok(Some(self.handle_providers_key(code))),
                 Screen::GlobalSettings => return Ok(Some(self.handle_global_key(code))),
                 Screen::Plugins => return Ok(Some(self.handle_plugins_key(code))),
+                Screen::Platforms => return Ok(Some(self.handle_platforms_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -1198,6 +1307,87 @@ impl<'a> App<'a> {
                 let i = self.plugins.state.selected().unwrap_or(0);
                 pages::plugins::toggle_plugin(&mut self.config, i);
                 self.dirty = true;
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
+
+    fn handle_platforms_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        if self.platforms.editing {
+            let selected = self.platforms.state.selected().unwrap_or(0);
+            let field_count =
+                pages::platforms::platform_fields(&self.config, selected).len();
+            return match code {
+                KeyCode::Esc => {
+                    self.platforms.editing = false;
+                    self.platforms.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let field = self.platforms.edit_field.min(field_count.saturating_sub(1));
+                    let value = self.platforms.edit_buffer.clone();
+                    if pages::platforms::apply_platform_field(
+                        &mut self.config,
+                        selected,
+                        field,
+                        &value,
+                    ) {
+                        self.dirty = true;
+                    }
+                    self.platforms.editing = false;
+                    self.platforms.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.platforms.edit_field =
+                        self.platforms.edit_field.saturating_sub(1);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    self.platforms.edit_field =
+                        (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
+                    AppEvent::None
+                }
+                KeyCode::Backspace => {
+                    self.platforms.edit_buffer.pop();
+                    AppEvent::None
+                }
+                KeyCode::Char(c) => {
+                    self.platforms.edit_buffer.push(c);
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Up | KeyCode::Char('k') => {
+                let i = self.platforms.state.selected().unwrap_or(0);
+                self.platforms.state.select(Some(i.saturating_sub(1)));
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let i = self.platforms.state.selected().unwrap_or(0);
+                let next = (i + 1).min(pages::platforms::PLATFORMS.len() - 1);
+                self.platforms.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Char(' ') => {
+                let i = self.platforms.state.selected().unwrap_or(0);
+                pages::platforms::toggle_platform(&mut self.config, i);
+                self.dirty = true;
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let selected = self.platforms.state.selected().unwrap_or(0);
+                self.platforms.edit_field = 1; // 跳过 enabled，从第一个真实字段开始
+                self.platforms.edit_buffer =
+                    pages::platforms::platform_field_value(&self.config, selected, 1);
+                self.platforms.editing = true;
                 AppEvent::None
             }
             _ => AppEvent::None,
