@@ -163,6 +163,7 @@ impl<'a> App<'a> {
             Screen::SubagentTiers => self.draw_subagent(frame, main_area, &theme),
             Screen::Providers => self.draw_providers(frame, main_area, &theme),
             Screen::GlobalSettings => self.draw_global(frame, main_area, &theme),
+            Screen::Plugins => self.draw_plugins(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
             _ => self.draw_placeholder(frame, main_area, &theme),
         }
@@ -623,6 +624,59 @@ impl<'a> App<'a> {
         frame.render_stateful_widget(list, layout[1], &mut self.global.state);
     }
 
+    fn draw_plugins(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let inner = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3),
+        };
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" 插件配置 ")
+            .title_alignment(Alignment::Center)
+            .border_style(Style::default().fg(theme.outline))
+            .style(Style::default().bg(theme.surface_bg));
+
+        let rows = pages::plugins::plugin_rows(&self.config);
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let hint = Line::from(" ↑↓ 导航  空格 启用/禁用  Esc 返回 ");
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[0],
+        );
+
+        let items: Vec<ListItem> = rows
+            .iter()
+            .map(|row| {
+                ListItem::new(Line::from(format!(" {row}")))
+                    .style(Style::default().fg(theme.on_surface))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" ▸ ");
+
+        frame.render_stateful_widget(list, layout[1], &mut self.plugins.state);
+    }
+
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -685,6 +739,7 @@ impl<'a> App<'a> {
                 Screen::SubagentTiers => return Ok(Some(self.handle_subagent_key(code))),
                 Screen::Providers => return Ok(Some(self.handle_providers_key(code))),
                 Screen::GlobalSettings => return Ok(Some(self.handle_global_key(code))),
+                Screen::Plugins => return Ok(Some(self.handle_plugins_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -1117,6 +1172,32 @@ impl<'a> App<'a> {
                 self.global.edit_buffer =
                     pages::global::field_value(&self.config, field);
                 self.global.editing = true;
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
+
+    fn handle_plugins_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Up | KeyCode::Char('k') => {
+                let i = self.plugins.state.selected().unwrap_or(0);
+                self.plugins.state.select(Some(i.saturating_sub(1)));
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let i = self.plugins.state.selected().unwrap_or(0);
+                let next = (i + 1).min(pages::plugins::PLUGINS.len() - 1);
+                self.plugins.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Char(' ') => {
+                let i = self.plugins.state.selected().unwrap_or(0);
+                pages::plugins::toggle_plugin(&mut self.config, i);
+                self.dirty = true;
                 AppEvent::None
             }
             _ => AppEvent::None,
