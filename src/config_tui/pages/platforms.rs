@@ -7,10 +7,11 @@ use ratatui::widgets::ListState;
 #[derive(Default)]
 pub struct PlatformsPage {
     pub state: ListState,
-    /// 编辑模式：true 时在内联表单编辑选中平台的字段。
     pub editing: bool,
     pub edit_field: usize,
     pub edit_buffer: String,
+    /// QQ 深度配置模式：true 时编辑 QQ 高级字段。
+    pub qq_advanced: bool,
 }
 
 impl PlatformsPage {
@@ -22,6 +23,7 @@ impl PlatformsPage {
             editing: false,
             edit_field: 0,
             edit_buffer: String::new(),
+            qq_advanced: false,
         }
     }
 }
@@ -333,4 +335,48 @@ mod tests {
         let ids = parse_id_list("1, 2, x, 3");
         assert_eq!(ids, vec![1, 2, 3]);
     }
+}
+
+// ── QQ Advanced fields ─────────────────────────────────────────────────
+
+/// QQ 高级配置字段（label, value）。
+pub fn qq_advanced_fields(config: &crate::config::OneBotConfig) -> Vec<(&'static str, String, bool)> {
+    // (label, value, is_bool)
+    vec![
+        ("allow_non_admin_host_tools", config.allow_non_admin_host_tools.to_string(), true),
+        ("group_intermediate_messages", config.group_intermediate_messages.to_string(), true),
+        ("private_intermediate_messages", config.private_intermediate_messages.to_string(), true),
+        ("user_identification", config.user_identification.to_string(), true),
+        ("show_group_name", config.show_group_name.to_string(), true),
+        ("asset_base_url", config.asset_base_url.clone(), false),
+        ("max_reply_chars", config.max_reply_chars.to_string(), false),
+        ("session_limits.running", config.session_limits.running.to_string(), false),
+        ("session_limits.queued", config.session_limits.queued.to_string(), false),
+    ]
+}
+
+/// 写回 QQ 高级字段。
+pub fn apply_qq_advanced_field(config: &mut crate::config::OneBotConfig, field: usize, value: &str) -> bool {
+    let value = value.trim().to_string();
+    match field {
+        0 => { let Ok(v) = value.parse::<bool>() else { return false }; config.allow_non_admin_host_tools = v; }
+        1 => { let Ok(v) = value.parse::<bool>() else { return false }; config.group_intermediate_messages = v; }
+        2 => { let Ok(v) = value.parse::<bool>() else { return false }; config.private_intermediate_messages = v; }
+        3 => { let Ok(v) = value.parse::<bool>() else { return false }; config.user_identification = v; }
+        4 => { let Ok(v) = value.parse::<bool>() else { return false }; config.show_group_name = v; }
+        5 => config.asset_base_url = value,
+        6 => { let Ok(v) = value.parse::<usize>() else { return false }; config.max_reply_chars = v; }
+        7 => {
+            let Ok(v) = value.parse::<usize>() else { return false };
+            if v > crate::config::MAX_PLATFORM_SESSION_RUNNING { return false; }
+            config.session_limits.running = v;
+        }
+        8 => {
+            let Ok(v) = value.parse::<usize>() else { return false };
+            if v > crate::config::MAX_PLATFORM_SESSION_QUEUED { return false; }
+            config.session_limits.queued = v;
+        }
+        _ => return false,
+    }
+    true
 }

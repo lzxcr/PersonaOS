@@ -830,6 +830,40 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
+        // ── QQ Advanced mode ─────────────────────────────────────────────
+        if self.platforms.qq_advanced {
+            let qq = &self.config.platforms.qq;
+            let fields = pages::platforms::qq_advanced_fields(qq);
+            let field_idx = self.platforms.edit_field.min(fields.len().saturating_sub(1));
+            let (label, _, is_bool) = &fields[field_idx];
+
+            let layout = Layout::default().direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Length(3), Constraint::Length(1)])
+                .split(inner);
+
+            let label_line = Line::from(vec![
+                Span::styled(" QQ Advanced ".to_string(), Style::default().fg(theme.primary_fg).bg(theme.primary_container_bg).add_modifier(Modifier::BOLD)),
+                Span::raw(format!(" > {label}  =  {}", &fields[field_idx].1)),
+            ]);
+            frame.render_widget(Paragraph::new(label_line), layout[0]);
+
+            let hint = if *is_bool {
+                Line::from(t(" Enter/Space toggle  ↑↓ switch field  Esc back ", " Enter/空格 切换  ↑↓ 切换字段  Esc 返回 "))
+            } else {
+                Line::from(t(" Enter edit  ↑↓ switch field  Esc back ", " Enter 编辑  ↑↓ 切换字段  Esc 返回 "))
+            };
+            frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)), layout[1]);
+
+            let input_box = Paragraph::new(self.platforms.edit_buffer.clone())
+                .block(Block::bordered().border_type(BorderType::Rounded))
+                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
+            frame.render_widget(input_box, layout[2]);
+
+            let help = Line::from(format!(" {}/{}", field_idx + 1, fields.len()));
+            frame.render_widget(Paragraph::new(help).style(Style::default().fg(theme.on_surface_variant)), layout[3]);
+            return;
+        }
+
         // ── Edit mode: field form ──────────────────────────────────────
         if self.platforms.editing {
             let selected = self.platforms.state.selected().unwrap_or(0);
@@ -1723,6 +1757,50 @@ impl<'a> App<'a> {
     fn handle_platforms_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
 
+        // ── QQ Advanced mode ────────────────────────────────────────────
+        if self.platforms.qq_advanced {
+            let qq = &self.config.platforms.qq;
+            let fields = pages::platforms::qq_advanced_fields(qq);
+            let field_count = fields.len();
+            let field_idx = self.platforms.edit_field.min(field_count.saturating_sub(1));
+            let is_bool = field_idx < fields.len() && fields[field_idx].2;
+
+            return match code {
+                KeyCode::Esc => {
+                    self.platforms.qq_advanced = false;
+                    self.platforms.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter | KeyCode::Char(' ') if is_bool => {
+                    let current = fields[field_idx].1.parse::<bool>().unwrap_or(false);
+                    let new_val = (!current).to_string();
+                    if pages::platforms::apply_qq_advanced_field(&mut self.config.platforms.qq, field_idx, &new_val) {
+                        self.dirty = true;
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let value = self.platforms.edit_buffer.clone();
+                    if pages::platforms::apply_qq_advanced_field(&mut self.config.platforms.qq, field_idx, &value) {
+                        self.dirty = true;
+                    }
+                    self.platforms.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.platforms.edit_field = self.platforms.edit_field.saturating_sub(1);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    self.platforms.edit_field = (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
+                    AppEvent::None
+                }
+                KeyCode::Backspace => { self.platforms.edit_buffer.pop(); AppEvent::None }
+                KeyCode::Char(c) => { self.platforms.edit_buffer.push(c); AppEvent::None }
+                _ => AppEvent::None,
+            };
+        }
+
         if self.platforms.editing {
             let selected = self.platforms.state.selected().unwrap_or(0);
             let field_count =
@@ -1791,7 +1869,14 @@ impl<'a> App<'a> {
             }
             KeyCode::Enter => {
                 let selected = self.platforms.state.selected().unwrap_or(0);
-                self.platforms.edit_field = 1; // 跳过 enabled，从第一个真实字段开始
+                if selected == 0 {
+                    // QQ: enter advanced config mode
+                    self.platforms.qq_advanced = true;
+                    self.platforms.edit_field = 5; // start at asset_base_url
+                    self.platforms.edit_buffer.clear();
+                    return AppEvent::None;
+                }
+                self.platforms.edit_field = 1;
                 self.platforms.edit_buffer =
                     pages::platforms::platform_field_value(&self.config, selected, 1);
                 self.platforms.editing = true;
