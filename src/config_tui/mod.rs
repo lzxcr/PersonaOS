@@ -37,7 +37,6 @@ enum Screen {
     Prompts,
     Platforms,
     GlobalSettings,
-    Quit,
 }
 
 struct App<'a> {
@@ -104,18 +103,23 @@ impl<'a> App<'a> {
                 match event {
                     AppEvent::SelectMainMenu(idx) => {
                         self.main_menu_state.select(Some(idx));
-                        self.screen = match idx {
-                            0 => Screen::TextModel,
-                            1 => Screen::MultimodalModel,
-                            2 => Screen::SubagentTiers,
-                            3 => Screen::Providers,
-                            4 => Screen::Plugins,
-                            5 => Screen::Prompts,
-                            6 => Screen::Platforms,
-                            7 => Screen::GlobalSettings,
-                            8 => Screen::Quit,
-                            _ => Screen::MainMenu,
-                        };
+                        match idx {
+                            0 => self.screen = Screen::TextModel,
+                            1 => self.screen = Screen::MultimodalModel,
+                            2 => self.screen = Screen::SubagentTiers,
+                            3 => self.screen = Screen::Providers,
+                            4 => self.screen = Screen::Plugins,
+                            5 => self.screen = Screen::Prompts,
+                            6 => self.screen = Screen::Platforms,
+                            7 => self.screen = Screen::GlobalSettings,
+                            8 => {
+                                self.quit = true;
+                                self.config.save(self.paths)?;
+                                self.thinking_variants.save(self.paths)?;
+                                return Ok(true);
+                            }
+                            _ => {}
+                        }
                     }
                     AppEvent::Back => self.screen = Screen::MainMenu,
                     AppEvent::None => {}
@@ -166,7 +170,6 @@ impl<'a> App<'a> {
             Screen::Plugins => self.draw_plugins(frame, main_area, &theme),
             Screen::Platforms => self.draw_platforms(frame, main_area, &theme),
             Screen::Prompts => self.draw_prompts(frame, main_area, &theme),
-            Screen::Quit => self.draw_quit(frame, main_area, &theme),
         }
 
         // ── Status bar ─────────────────────────────────────────────────
@@ -849,29 +852,6 @@ impl<'a> App<'a> {
         );
     }
 
-    fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title(format!(" {} ", screen_title(&self.screen)))
-            .title_alignment(Alignment::Center)
-            .border_style(Style::default().fg(theme.outline))
-            .style(Style::default().bg(theme.surface_bg));
-
-        let text = Paragraph::new(
-            "此页面正在迁移到 ratatui...\n\n按 Esc 返回主菜单"
-        )
-        .block(block)
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(theme.on_surface));
-
-        frame.render_widget(text, area);
-    }
-
-    fn draw_quit(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
-        self.quit = true;
-        self.draw_placeholder(frame, area, theme);
-    }
-
     // ── Input ──────────────────────────────────────────────────────────
 
     fn handle_input(&mut self) -> Result<Option<AppEvent>> {
@@ -914,12 +894,6 @@ impl<'a> App<'a> {
                 Screen::Plugins => return Ok(Some(self.handle_plugins_key(code))),
                 Screen::Platforms => return Ok(Some(self.handle_platforms_key(code))),
                 Screen::Prompts => return Ok(Some(self.handle_prompts_key(code))),
-                _ => match code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
-                        return Ok(Some(AppEvent::Back));
-                    }
-                    _ => {}
-                },
             },
             _ => {}
         }
@@ -1515,7 +1489,6 @@ fn screen_title(screen: &Screen) -> &'static str {
         Screen::Prompts => "提示词",
         Screen::Platforms => "IM 平台",
         Screen::GlobalSettings => "全局设置",
-        Screen::Quit => "退出",
     }
 }
 
