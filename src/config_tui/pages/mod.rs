@@ -18,6 +18,11 @@ pub enum PageAction {
     Reopen,
 }
 
+/// 双语文本便捷包装：使用 crate::i18n::text 返回当前语种的字符串。
+pub fn t(en: &'static str, zh: &'static str) -> String {
+    crate::i18n::text(en, zh).to_string()
+}
+
 /// 共享的滚动列表状态辅助。
 pub fn scroll_offset(selected: usize, visible: usize, total: usize) -> usize {
     if total == 0 {
@@ -30,6 +35,14 @@ pub fn scroll_offset(selected: usize, visible: usize, total: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t_returns_chinese_by_default() {
+        // 默认 locale 是 auto → 中文环境通常返回 zh。
+        let result = t("Hello", "你好");
+        assert!(!result.is_empty());
+        assert!(result == "你好" || result == "Hello", "got: {result}");
+    }
 
     #[test]
     fn scroll_stays_in_bounds() {

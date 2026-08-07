@@ -9,6 +9,7 @@ use crate::config::{ActiveProviderModelConfig, AppConfig};
 use crate::llm::ThinkingVariantPreferences;
 use crate::paths::PersonaPaths;
 use anyhow::Result;
+use pages::t;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -212,15 +213,15 @@ impl<'a> App<'a> {
         let multimodal = active_multimodal_label(&self.config);
 
         let items: Vec<ListItem> = vec![
-            format!(" 文本模型 (当前: {active})"),
-            format!(" 多模态模型 (当前: {multimodal})"),
-            format!(" 子代理档位池 ({})", subagent_tiers_label(&self.config)),
-            " 供应商和模型".to_string(),
-            " 插件配置".to_string(),
-            " 自定义提示词".to_string(),
-            format!(" IM 平台 ({})", platforms_label(&self.config)),
-            " 全局参数设置".to_string(),
-            " 保存并退出".to_string(),
+            format!(" {} ({})", t("Text model", "文本模型"), active),
+            format!(" {} ({})", t("Multimodal model", "多模态模型"), multimodal),
+            format!(" {} ({})", t("Subagent tier pools", "子代理档位池"), subagent_tiers_label(&self.config)),
+            format!(" {}", t("Providers and models", "供应商和模型")),
+            format!(" {}", t("Plugins", "插件配置")),
+            format!(" {}", t("Custom prompts", "自定义提示词")),
+            format!(" {} ({})", t("IM Platforms", "IM 平台"), platforms_label(&self.config)),
+            format!(" {}", t("Global settings", "全局参数设置")),
+            format!(" {}", t("Save and quit", "保存并退出")),
         ]
         .into_iter()
         .map(|s| ListItem::new(s).style(Style::default().fg(theme.on_surface)))
@@ -1338,7 +1339,7 @@ impl<'a> App<'a> {
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let i = self.plugins.state.selected().unwrap_or(0);
-                let next = (i + 1).min(pages::plugins::PLUGINS.len() - 1);
+                let next = (i + 1).min(pages::plugins::plugins().len() - 1);
                 self.plugins.state.select(Some(next));
                 AppEvent::None
             }
@@ -1478,17 +1479,17 @@ enum AppEvent {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-fn screen_title(screen: &Screen) -> &'static str {
+fn screen_title(screen: &Screen) -> String {
     match screen {
-        Screen::MainMenu => "主菜单",
-        Screen::TextModel => "文本模型",
-        Screen::MultimodalModel => "多模态模型",
-        Screen::SubagentTiers => "子代理档位",
-        Screen::Providers => "供应商",
-        Screen::Plugins => "插件配置",
-        Screen::Prompts => "提示词",
-        Screen::Platforms => "IM 平台",
-        Screen::GlobalSettings => "全局设置",
+        Screen::MainMenu => t("Main menu", "主菜单"),
+        Screen::TextModel => t("Text model", "文本模型"),
+        Screen::MultimodalModel => t("Multimodal model", "多模态模型"),
+        Screen::SubagentTiers => t("Subagent tiers", "子代理档位"),
+        Screen::Providers => t("Providers", "供应商"),
+        Screen::Plugins => t("Plugins", "插件配置"),
+        Screen::Prompts => t("Prompts", "提示词"),
+        Screen::Platforms => t("IM Platforms", "IM 平台"),
+        Screen::GlobalSettings => t("Global settings", "全局设置"),
     }
 }
 
@@ -1497,17 +1498,17 @@ fn active_label(config: &AppConfig) -> String {
         .active_provider_model_choices()
         .first()
         .map(|c| c.label())
-        .unwrap_or_else(|| "未配置".to_string())
+        .unwrap_or_else(|| t("Not configured", "未配置"))
 }
 
 fn active_multimodal_label(config: &AppConfig) -> String {
     let choices = config.active_multimodal_provider_model_choices();
     if choices.is_empty() {
-        "未配置".to_string()
+        t("Not configured", "未配置")
     } else if choices.len() == 1 {
         choices[0].label()
     } else {
-        format!("{} 个模型", choices.len())
+        format!("{} {}", choices.len(), t("models", "个模型"))
     }
 }
 
@@ -1613,7 +1614,7 @@ fn subagent_tiers_label(config: &AppConfig) -> String {
     let balanced = config.subagent_tiers.balanced.len();
     let strong = config.subagent_tiers.strong.len();
     if cheap + balanced + strong == 0 {
-        "继承主池".to_string()
+        t("Inherit main pool", "继承主池")
     } else {
         format!("{cheap}/{balanced}/{strong}")
     }
@@ -1631,7 +1632,7 @@ fn platforms_label(config: &AppConfig) -> String {
         active.push("QQ官");
     }
     if active.is_empty() {
-        "全部关闭".to_string()
+        t("All disabled", "全部关闭")
     } else {
         active.join(",")
     }

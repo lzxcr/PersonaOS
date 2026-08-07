@@ -1,5 +1,6 @@
 //! 插件配置页 — 插件列表 + 启用/禁用切换。
 
+use super::t;
 use crate::config::AppConfig;
 use ratatui::widgets::ListState;
 
@@ -18,22 +19,24 @@ impl PluginsPage {
 }
 
 /// 插件定义：id、显示名、描述。
-pub const PLUGINS: [(&str, &str, &str); 14] = [
-    ("web", "网络搜索", "搜索 API 与脚本 fallback"),
-    ("deep_research", "深度研究", "长任务研究并输出 Markdown"),
-    ("vision", "识图", "图片理解和终端预览"),
-    ("image_generation", "生图", "文本生成图片"),
-    ("web_images", "搜图", "网络图片搜索、下载与审核"),
-    ("print_image", "打印图片", "终端图片打印尺寸"),
-    ("memes", "表情包", "人格表情库与发送尺寸"),
-    ("knowledge_base", "知识库", "本地文件检索与语义索引"),
-    ("archlinux", "Arch Linux", "AUR 状态与 ArchWiki 查询"),
-    ("man", "在线手册", "在线 man 手册搜索与读取"),
-    ("memory", "记忆", "长期记忆与联想"),
-    ("package_advisor", "AUR 审查", "PKGBUILD/AUR 安全审查"),
-    ("deep_research_linux_game_compatibility", "Linux 游戏兼容", "Proton/反作弊/兼容性查询"),
-    ("api_quota", "大模型额度查询", "查询 DeepSeek 与 OpenRouter API 额度"),
-];
+pub fn plugins() -> [(&'static str, String, String); 14] {
+    [
+        ("web", t("Web search", "网络搜索"), t("Search APIs with script fallback", "搜索 API 与脚本 fallback")),
+        ("deep_research", t("Deep research", "深度研究"), t("Run long research tasks and output Markdown", "长任务研究并输出 Markdown")),
+        ("vision", t("Vision", "识图"), t("Image understanding and terminal preview", "图片理解和终端预览")),
+        ("image_generation", t("Image generation", "生图"), t("Generate images from text", "文本生成图片")),
+        ("web_images", t("Image search", "搜图"), t("Search, download, and review web images", "网络图片搜索、下载与审核")),
+        ("print_image", t("Print image", "打印图片"), t("Terminal image print size", "终端图片打印尺寸")),
+        ("memes", t("Memes", "表情包"), t("Persona meme library and send size", "人格表情库与发送尺寸")),
+        ("knowledge_base", t("Knowledge base", "知识库"), t("Local file search and semantic index", "本地文件检索与语义索引")),
+        ("archlinux", "Arch Linux".to_string(), t("AUR status and ArchWiki lookup", "AUR 状态与 ArchWiki 查询")),
+        ("man", t("Online manuals", "在线手册"), t("Search and read online man pages", "在线 man 手册搜索与读取")),
+        ("memory", t("Memory", "记忆"), t("Long-term memory and association", "长期记忆与联想")),
+        ("package_advisor", t("AUR review", "AUR 审查"), t("PKGBUILD/AUR security review", "PKGBUILD/AUR 安全审查")),
+        ("deep_research_linux_game_compatibility", t("Linux game compatibility", "Linux 游戏兼容"), t("Proton/anti-cheat/compatibility lookup", "Proton/反作弊/兼容性查询")),
+        ("api_quota", t("LLM API quota", "大模型额度查询"), t("Query DeepSeek and OpenRouter API quota", "查询 DeepSeek 与 OpenRouter API 额度")),
+    ]
+}
 
 /// 插件是否启用。
 pub fn plugin_enabled(config: &AppConfig, index: usize) -> bool {
@@ -81,8 +84,8 @@ pub fn toggle_plugin(config: &mut AppConfig, index: usize) -> bool {
 
 /// 插件列表行：`[✓/ ] 显示名 — 描述 (id)`。
 pub fn plugin_rows(config: &AppConfig) -> Vec<String> {
-    PLUGINS
-        .iter()
+    plugins()
+        .into_iter()
         .enumerate()
         .map(|(i, (id, name, desc))| {
             let mark = if plugin_enabled(config, i) { "✓" } else { " " };
@@ -97,9 +100,9 @@ mod tests {
 
     #[test]
     fn plugins_list_has_14_entries() {
-        assert_eq!(PLUGINS.len(), 14);
-        assert_eq!(PLUGINS[0].0, "web");
-        assert_eq!(PLUGINS[13].0, "api_quota");
+        assert_eq!(plugins().len(), 14);
+        assert_eq!(plugins()[0].0, "web");
+        assert_eq!(plugins()[13].0, "api_quota");
     }
 
     #[test]
@@ -116,14 +119,13 @@ mod tests {
         let mut config = AppConfig::default();
         // 找一个默认禁用的插件做翻转测试。
         let mut disabled_index = None;
-        for i in 0..PLUGINS.len() {
+        for i in 0..plugins().len() {
             if !plugin_enabled(&config, i) {
                 disabled_index = Some(i);
                 break;
             }
         }
         let Some(index) = disabled_index else {
-            // 全部默认启用时，翻转第一个即可验证。
             let rows = plugin_rows(&config);
             assert!(rows[0].starts_with("[✓]"));
             toggle_plugin(&mut config, 0);
