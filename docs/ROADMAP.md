@@ -11,7 +11,7 @@
 | Plan 模式（`pos --plan`） | ✅ |
 | Chat 模式 | ✅ |
 | fish / bash / zsh shell 集成 | ✅ |
-| TUI 配置界面（`pos config`） | ✅ |
+| TUI 配置界面 (`pos config`) — ratatui + MD3 主题 | ✅ |
 | 剪切板图片粘贴 | ✅ |
 | 会话管理（创建/切换/重命名/归档/删除） | ✅ |
 | 会话工作目录绑定 | ✅ |
@@ -48,7 +48,7 @@
 | 动态准入授权 | ✅ |
 | 回复格式加工 | ✅ |
 | 终端 → 图片卡片渲染（QQ 群聊） | ✅ |
-| Telegram (PlatformAdapter stub) | ⚠️ 骨架 |
+| Telegram — getUpdates 长轮询 (完整 PlatformAdapter) | ✅ |
 | QQ 官方机器人 (PlatformAdapter stub) | ⚠️ 骨架 |
 
 ### 记忆系统
@@ -111,7 +111,6 @@
 
 | 项目 | 优先级 | 预计工作量 |
 |---|---|---|
-| Telegram 平台 getUpdates 轮询 + webhook | 高 | 中 (3-5 天) |
 | QQ 官方机器人 WebSocket 事件管线 | 中 | 中 (3-5 天) |
 | WeChat 平台适配器 | 低 | 大 (1-2 周) |
 | 平台间消息转发 | 低 | 中 |
@@ -179,7 +178,8 @@
 
 | 项目 | 说明 |
 |---|---|
+| TUI 配置界面已完成 ratatui 迁移（8400行→3000行，MD3主题） | — |
 | `real_context` 模块 (~120KB) | 最大单文件，重构为子模块 |
 | `onebot.rs` (~9000 行) | 建议按功能拆分子文件 |
 | 平台插件配置硬编码 | Phase 2 已部分解决，config TUI 同步更新 |
-| 测试中 `muted_bot_suppresses...` 偶发失败 | 需修复（1227/1228 通过） |
+| 全量测试 1236/1236 通过 | — |

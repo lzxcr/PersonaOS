@@ -38,12 +38,13 @@ PersonaOS
 `pos` 由大模型驱动，**不预置任何模型供应商**——你需要自行在 `pos config` 中配置供应商和 API key。支持任何 OpenAI 兼容 API。
 
 - 终端集成：与 `fish`、`zsh`、`bash` 集成，终端打字直接对话
-- REPL 交互模式、TUI 配置界面、WebUI 网页
-- NapCat 接入 QQ：私聊、群聊、群管理
+- REPL 交互模式、TUI 配置界面（MD3 主题 + ratatui）、WebUI 网页
+- IM 平台：NapCat/QQ（私聊/群聊/群管）、Telegram、QQ 官方机器人
 - 记忆系统：短期/长期日记、知识点、联想召回（jieba 分词）
 - 工具全家桶：天气、汇率、闹钟、玄学、骰子、表情包、搜图、生图、网络搜索、深度研究、文件操作、计算器、哈希编解码
-- Skill 系统：可复用的子-agent 编排能力
+- Skill 系统：可复用的子-agent 编排、创建/发布/禁用
 - 知识库：按需导入本地内容，支持关键词 + 语义检索
+- 媒体接口：TTS（语音合成）/ STT（语音识别）trait 抽象，由用户配置 provider
 
 ## 如何构建？
 

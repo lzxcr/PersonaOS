@@ -93,7 +93,10 @@ src/
 ├── prompts/           # 提示词模板
 ├── render/            # 终端渲染 (cosmic-text)
 ├── shell/             # fish/bash/zsh 集成
-├── config_tui.rs      # TUI 配置界面
+├── config_tui/        # TUI 配置界面 (ratatui + MD3 主题)
+│   ├── mod.rs         #   主应用路由 / 事件循环
+│   ├── theme.rs       #   MD3 暗/亮双主题
+│   └── pages/         #   8 个子页面 (模型/供应商/插件/平台/全局/提示词)
 ├── question.rs        # 终端交互式问答
 ├── clipboard.rs       # 剪切板
 ├── token_counter.rs   # token 计数

@@ -219,7 +219,7 @@ QQ 群管插件（7 个内置）：
 
 ### TUI 配置
 
-运行 `pos config` 打开终端配置界面，支持键盘导航（方向键/Tab/Enter）。所有通过 TUI 修改的配置直接写入 `config.jsonc`。
+运行 `pos config` 打开 MD3 主题的终端配置界面（ratatui 渲染），支持键盘导航（↑↓/Enter/Esc）。修改直接写入 `config.jsonc`。
 
 ## 配置热重载
 
