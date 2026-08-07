@@ -162,6 +162,7 @@ impl<'a> App<'a> {
             Screen::MultimodalModel => self.draw_multimodal(frame, main_area, &theme),
             Screen::SubagentTiers => self.draw_subagent(frame, main_area, &theme),
             Screen::Providers => self.draw_providers(frame, main_area, &theme),
+            Screen::GlobalSettings => self.draw_global(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
             _ => self.draw_placeholder(frame, main_area, &theme),
         }
@@ -518,6 +519,110 @@ impl<'a> App<'a> {
         );
     }
 
+    fn draw_global(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let inner = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3),
+        };
+
+        if self.global.editing {
+            let field = pages::global::GLOBAL_FIELDS
+                [self.global.state.selected().unwrap_or(0)
+                    .min(pages::global::GLOBAL_FIELDS.len() - 1)];
+            let value = pages::global::field_value(&self.config, self.global.state.selected().unwrap_or(0));
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            let label_line = Line::from(vec![
+                Span::styled(
+                    format!(" {field} "),
+                    Style::default()
+                        .fg(theme.primary_fg)
+                        .bg(theme.primary_container_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" 当前: {value}")),
+            ]);
+            frame.render_widget(Paragraph::new(label_line), layout[0]);
+
+            let hint = Line::from(" 输入新值后按 Enter 应用  ↑↓ 切换字段  Esc 返回 ");
+            frame.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+                layout[1],
+            );
+
+            let input_box = Paragraph::new(self.global.edit_buffer.clone())
+                .block(Block::bordered().border_type(BorderType::Rounded))
+                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
+            frame.render_widget(input_box, layout[2]);
+
+            let help_line = Line::from(format!(
+                " 字段 {} / {}  (bool: true/false)",
+                self.global.state.selected().unwrap_or(0) + 1,
+                pages::global::GLOBAL_FIELDS.len()
+            ));
+            frame.render_widget(
+                Paragraph::new(help_line).style(Style::default().fg(theme.on_surface_variant)),
+                layout[3],
+            );
+            return;
+        }
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" 全局参数设置 ")
+            .title_alignment(Alignment::Center)
+            .border_style(Style::default().fg(theme.outline))
+            .style(Style::default().bg(theme.surface_bg));
+
+        let rows = pages::global::global_rows(&self.config);
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let hint = Line::from(" ↑↓ 导航  Enter 编辑  Esc 返回 ");
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[0],
+        );
+
+        let items: Vec<ListItem> = rows
+            .iter()
+            .map(|row| {
+                ListItem::new(Line::from(format!(" {row}")))
+                    .style(Style::default().fg(theme.on_surface))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" ▸ ");
+
+        frame.render_stateful_widget(list, layout[1], &mut self.global.state);
+    }
+
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -579,6 +684,7 @@ impl<'a> App<'a> {
                 Screen::MultimodalModel => return Ok(Some(self.handle_multimodal_key(code))),
                 Screen::SubagentTiers => return Ok(Some(self.handle_subagent_key(code))),
                 Screen::Providers => return Ok(Some(self.handle_providers_key(code))),
+                Screen::GlobalSettings => return Ok(Some(self.handle_global_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -958,6 +1064,62 @@ impl<'a> App<'a> {
             .position(|p| p.id == new_id)
         {
             self.providers.state.select(Some(i));
+        }
+    }
+
+    fn handle_global_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        if self.global.editing {
+            return match code {
+                KeyCode::Esc => {
+                    self.global.editing = false;
+                    self.global.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let field = self.global.state.selected().unwrap_or(0);
+                    let value = self.global.edit_buffer.clone();
+                    if pages::global::apply_field(&mut self.config, field, &value) {
+                        self.dirty = true;
+                    }
+                    self.global.editing = false;
+                    self.global.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Backspace => {
+                    self.global.edit_buffer.pop();
+                    AppEvent::None
+                }
+                KeyCode::Char(c) => {
+                    self.global.edit_buffer.push(c);
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Up | KeyCode::Char('k') => {
+                let i = self.global.state.selected().unwrap_or(0);
+                self.global.state.select(Some(i.saturating_sub(1)));
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let i = self.global.state.selected().unwrap_or(0);
+                let next = (i + 1).min(pages::global::GLOBAL_FIELDS.len() - 1);
+                self.global.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let field = self.global.state.selected().unwrap_or(0);
+                self.global.edit_buffer =
+                    pages::global::field_value(&self.config, field);
+                self.global.editing = true;
+                AppEvent::None
+            }
+            _ => AppEvent::None,
         }
     }
 }
