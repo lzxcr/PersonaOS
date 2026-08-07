@@ -637,9 +637,62 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
+        // ── Detail edit mode ────────────────────────────────────────────
+        if self.plugins.editing {
+            let mut fields = self.plugins.current_fields(&self.config);
+            let field_idx = self.plugins.edit_field.min(fields.len().saturating_sub(1));
+            if field_idx >= fields.len() {
+                return;
+            }
+            let field = &fields[field_idx];
+            let plugin_id = pages::plugins::plugins()[self.plugins.state.selected().unwrap_or(0)].0;
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            let label_line = Line::from(vec![
+                Span::styled(plugin_id, Style::default().fg(theme.primary_fg).bg(theme.primary_container_bg).add_modifier(Modifier::BOLD)),
+                Span::raw(format!(" > {} ", field.label)),
+                Span::raw(format!("当前: {}", field.display_value())),
+            ]);
+            frame.render_widget(Paragraph::new(label_line), layout[0]);
+
+            let hint_text = if field.is_bool {
+                t(" Enter/Space to toggle  ↑↓ switch field  Esc back ", " Enter/空格 切换  ↑↓ 切换字段  Esc 返回 ")
+            } else if !field.choices.is_empty() {
+                t(" Enter to pick from choices  ↑↓ switch field  Esc back ", " Enter 从选项中选择  ↑↓ 切换字段  Esc 返回 ")
+            } else {
+                t(" Enter to edit  ↑↓ switch field  Esc back ", " Enter 编辑  ↑↓ 切换字段  Esc 返回 ")
+            };
+            frame.render_widget(
+                Paragraph::new(Line::from(hint_text)).style(Style::default().fg(theme.on_surface_variant)),
+                layout[1],
+            );
+
+            let input_box = Paragraph::new(self.plugins.edit_buffer.clone())
+                .block(Block::bordered().border_type(BorderType::Rounded))
+                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
+            frame.render_widget(input_box, layout[2]);
+
+            let help_line = Line::from(format!(" {} {}/{}", t("Field", "字段"), field_idx + 1, fields.len()));
+            frame.render_widget(
+                Paragraph::new(help_line).style(Style::default().fg(theme.on_surface_variant)),
+                layout[3],
+            );
+            return;
+        }
+
+        // ── List mode ──────────────────────────────────────────────────
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .title(" 插件配置 ")
+            .title(t("Plugins", "插件配置"))
             .title_alignment(Alignment::Center)
             .border_style(Style::default().fg(theme.outline))
             .style(Style::default().bg(theme.surface_bg));
@@ -655,7 +708,7 @@ impl<'a> App<'a> {
             ])
             .split(inner);
 
-        let hint = Line::from(" ↑↓ 导航  空格 启用/禁用  Esc 返回 ");
+        let hint = Line::from(t(" ↑↓ navigate  Space toggle  Enter detail  Esc back ", " ↑↓ 导航  空格 启用/禁用  Enter 详情  Esc 返回 "));
         frame.render_widget(
             Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
             layout[0],
@@ -1330,6 +1383,85 @@ impl<'a> App<'a> {
     fn handle_plugins_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
 
+        // ── Detail edit mode ────────────────────────────────────────────
+        if self.plugins.editing {
+            let mut fields = self.plugins.current_fields(&self.config);
+            let field_count = fields.len();
+            let field_idx = self.plugins.edit_field.min(field_count.saturating_sub(1));
+            let current = if field_idx < fields.len() { &fields[field_idx] } else { return AppEvent::Back; };
+
+            return match code {
+                KeyCode::Esc => {
+                    self.plugins.editing = false;
+                    self.plugins.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter | KeyCode::Char(' ') if current.is_bool => {
+                    // Toggle boolean field
+                    fields[field_idx].value = (!pages::plugins::parse_bool_field(&current.value).unwrap_or(false)).to_string();
+                    let saved = pages::plugins::apply_plugin_fields(
+                        &mut self.config,
+                        self.plugins.state.selected().unwrap_or(0),
+                        &fields,
+                    );
+                    if saved.is_ok() { self.dirty = true; }
+                    AppEvent::None
+                }
+                KeyCode::Enter if !current.choices.is_empty() => {
+                    // Pick choice
+                    let choices = &current.choices;
+                    if !choices.is_empty() {
+                        let current_index = choices.iter().position(|c| c == &current.value).unwrap_or(0);
+                        let next = (current_index + 1) % choices.len();
+                        let mut updated = fields.clone();
+                        updated[field_idx].value = choices[next].clone();
+                        let saved = pages::plugins::apply_plugin_fields(
+                            &mut self.config,
+                            self.plugins.state.selected().unwrap_or(0),
+                            &updated,
+                        );
+                        if saved.is_ok() { self.dirty = true; self.plugins.edit_buffer.clear(); }
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let value = self.plugins.edit_buffer.clone();
+                    let mut updated = fields.clone();
+                    updated[field_idx].value = value;
+                    let saved = pages::plugins::apply_plugin_fields(
+                        &mut self.config,
+                        self.plugins.state.selected().unwrap_or(0),
+                        &updated,
+                    );
+                    if saved.is_ok() {
+                        self.dirty = true;
+                    }
+                    self.plugins.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
+                    self.plugins.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
+                    self.plugins.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Backspace => {
+                    self.plugins.edit_buffer.pop();
+                    AppEvent::None
+                }
+                KeyCode::Char(c) => {
+                    self.plugins.edit_buffer.push(c);
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── List mode ──────────────────────────────────────────────────
         match code {
             KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1347,6 +1479,15 @@ impl<'a> App<'a> {
                 let i = self.plugins.state.selected().unwrap_or(0);
                 pages::plugins::toggle_plugin(&mut self.config, i);
                 self.dirty = true;
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let i = self.plugins.state.selected().unwrap_or(0);
+                // Load first field value into edit buffer for quick editing
+                let fields = pages::plugins::plugin_fields(&self.config, i);
+                self.plugins.edit_field = 0;
+                self.plugins.edit_buffer = fields.first().map(|f| f.value.clone()).unwrap_or_default();
+                self.plugins.editing = true;
                 AppEvent::None
             }
             _ => AppEvent::None,

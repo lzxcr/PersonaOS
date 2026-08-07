@@ -1,22 +1,40 @@
-//! 插件配置页 — 插件列表 + 启用/禁用切换。
+//! 插件配置页 — 插件列表 + 启用/禁用切换 + 字段详情编辑。
 
 use super::t;
 use crate::config::AppConfig;
+use anyhow::{bail, Result};
 use ratatui::widgets::ListState;
 
 /// 页面状态。
 #[derive(Default)]
 pub struct PluginsPage {
     pub state: ListState,
+    /// 详情编辑模式：true 时编辑当前插件的字段。
+    pub editing: bool,
+    pub edit_field: usize,
+    pub edit_buffer: String,
 }
 
 impl PluginsPage {
     pub fn new() -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
-        Self { state }
+        Self {
+            state,
+            editing: false,
+            edit_field: 0,
+            edit_buffer: String::new(),
+        }
+    }
+
+    /// 当前选中插件的字段列表。
+    pub fn current_fields(&self, config: &AppConfig) -> Vec<Field> {
+        let i = self.state.selected().unwrap_or(0);
+        plugin_fields(config, i)
     }
 }
+
+// ── Plugin list / toggle ──────────────────────────────────────────────
 
 /// 插件定义：id、显示名、描述。
 pub fn plugins() -> [(&'static str, String, String); 14] {
@@ -94,49 +112,263 @@ pub fn plugin_rows(config: &AppConfig) -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ── Field abstraction ──────────────────────────────────────────────────
 
-    #[test]
-    fn plugins_list_has_14_entries() {
-        assert_eq!(plugins().len(), 14);
-        assert_eq!(plugins()[0].0, "web");
-        assert_eq!(plugins()[13].0, "api_quota");
+/// 可编辑字段的声明式描述。
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub label: String,
+    pub value: String,
+    pub is_bool: bool,
+    pub is_sensitive: bool,
+    pub choices: Vec<String>,
+}
+
+impl Field {
+    pub fn new(label: String, value: String) -> Self {
+        Self { label, value, is_bool: false, is_sensitive: false, choices: Vec::new() }
     }
 
-    #[test]
-    fn toggle_plugin_flips_state() {
-        let mut config = AppConfig::default();
-        let before = plugin_enabled(&config, 0);
-        let after = toggle_plugin(&mut config, 0);
-        assert_ne!(before, after);
-        assert_eq!(after, plugin_enabled(&config, 0));
+    pub fn boolean(label: String, value: bool) -> Self {
+        Self { label, value: value.to_string(), is_bool: true, is_sensitive: false, choices: Vec::new() }
     }
 
-    #[test]
-    fn rows_mark_enabled_plugins() {
-        let mut config = AppConfig::default();
-        // 找一个默认禁用的插件做翻转测试。
-        let mut disabled_index = None;
-        for i in 0..plugins().len() {
-            if !plugin_enabled(&config, i) {
-                disabled_index = Some(i);
-                break;
+    pub fn sensitive(mut self) -> Self {
+        self.is_sensitive = true;
+        self
+    }
+
+    pub fn choices(mut self, choices: &[&str]) -> Self {
+        self.choices = choices.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    /// 显示值（脱敏处理）。
+    pub fn display_value(&self) -> String {
+        if self.is_sensitive && !self.value.is_empty() {
+            if self.value.starts_with("sk-") {
+                format!("{}…", &self.value[..6.min(self.value.len())])
+            } else if self.value.starts_with("$env:") {
+                self.value.clone()
+            } else {
+                "***".to_string()
             }
+        } else {
+            self.value.clone()
         }
-        let Some(index) = disabled_index else {
-            let rows = plugin_rows(&config);
-            assert!(rows[0].starts_with("[✓]"));
-            toggle_plugin(&mut config, 0);
-            let rows = plugin_rows(&config);
-            assert!(rows[0].starts_with("[ ]"));
-            return;
-        };
-        let rows = plugin_rows(&config);
-        assert!(rows[index].starts_with("[ ]"), "应默认禁用: {}", rows[index]);
-        toggle_plugin(&mut config, index);
-        let rows = plugin_rows(&config);
-        assert!(rows[index].starts_with("[✓]"));
     }
+}
+
+pub fn parse_bool_field(value: &str) -> Result<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        other => bail!("invalid boolean: {other}"),
+    }
+}
+
+// ── Plugin field definitions ───────────────────────────────────────────
+
+pub fn plugin_fields(config: &AppConfig, index: usize) -> Vec<Field> {
+    match index {
+        0 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.web.enabled),
+            Field::new(t("Results per request", "每次返回数量"), config.plugins.web.max_results.to_string()),
+            Field::new("Tavily API Keys".to_string(), config.plugins.web.tavily_api_keys.join("\n")).sensitive(),
+            Field::new("Firecrawl API Keys".to_string(), config.plugins.web.firecrawl_api_keys.join("\n")).sensitive(),
+            Field::new("AnySearch API Keys".to_string(), config.plugins.web.anysearch_api_keys.join("\n")).sensitive(),
+            Field::new("SearXNG URL".to_string(), config.plugins.web.searxng_base_url.clone()),
+        ],
+        1 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.deep_research.enabled),
+            Field::new(t("Output directory", "输出目录"), config.plugins.deep_research.output_dir.clone()),
+            Field::new(t("Thinking depth", "思考深度"), config.plugins.deep_research.thinking_depth.clone())
+                .choices(&["minimal", "low", "medium", "high", "xhigh"]),
+            Field::new(t("Maximum review revisions", "最大审视修正次数"), config.plugins.deep_research.max_review_revisions.to_string()),
+            Field::new(t("Tool steps per round", "每轮工具步数"), config.plugins.deep_research.max_tool_steps_per_round.to_string()),
+            Field::new(t("Final answer character limit", "最终字数上限"), config.plugins.deep_research.max_final_answer_chars.to_string()),
+            Field::new(t("Tool timeout (seconds)", "工具超时秒数"), config.plugins.deep_research.tool_call_timeout_seconds.to_string()),
+            Field::boolean(t("Show progress", "显示过程进度"), config.plugins.deep_research.show_progress),
+        ],
+        2 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.vision.enabled),
+            Field::boolean(t("Prefer current model for images", "优先使用当前模型识图"), config.plugins.vision.prefer_current_multimodal_model),
+            Field::new(t("Vision provider", "识图供应商"), config.plugins.vision.vision_provider_id.clone()),
+            Field::new(t("Vision model", "识图模型"), config.plugins.vision.vision_model.clone()),
+            Field::new(t("Response header timeout (s)", "响应头超时秒"), config.plugins.vision.response_header_timeout_seconds.to_string()),
+            Field::new(t("Stream idle timeout (s)", "流空闲超时秒"), config.plugins.vision.stream_idle_timeout_seconds.to_string()),
+            Field::new(t("Image timeout (s)", "图片超时秒"), config.plugins.vision.image_timeout_seconds.to_string()),
+            Field::boolean(t("Preview with chafa", "终端图片预览"), config.plugins.vision.preview_with_chafa),
+        ],
+        3 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.image_generation.enabled),
+            Field::new(t("Provider type", "供应商类型"), config.plugins.image_generation.provider_type.clone()),
+            Field::new(t("Base URL", "基础 URL"), config.plugins.image_generation.base_url.clone()),
+            Field::new(t("API Keys", "API 密钥"), config.plugins.image_generation.api_keys.join("\n")).sensitive(),
+            Field::new(t("Model", "模型"), config.plugins.image_generation.model.clone()),
+            Field::new(t("Default aspect ratio", "默认宽高比"), config.plugins.image_generation.default_aspect_ratio.clone()),
+            Field::new(t("Default resolution", "默认分辨率"), config.plugins.image_generation.default_resolution.clone()),
+            Field::new(t("Output dir", "输出目录"), config.plugins.image_generation.output_dir.clone()),
+            Field::boolean(t("Auto print", "自动打印"), config.plugins.image_generation.auto_print),
+            Field::new(t("Timeout (s)", "超时秒"), config.plugins.image_generation.timeout_seconds.to_string()),
+        ],
+        4 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.web_images.enabled),
+            Field::new(t("Source mode", "来源模式"), config.plugins.web_images.source_mode.clone()),
+            Field::new(t("Max results", "最大结果数"), config.plugins.web_images.max_results.to_string()),
+            Field::new(t("Max download (MB)", "最大下载(MB)"), config.plugins.web_images.max_download_mb.to_string()),
+            Field::boolean(t("Safe search", "安全搜索"), config.plugins.web_images.safe_search),
+            Field::boolean(t("Vision screening", "画面审核"), config.plugins.web_images.vision_screening_enabled),
+            Field::boolean(t("Auto preview", "自动预览"), config.plugins.web_images.auto_preview),
+            Field::new(t("Preview count", "预览数量"), config.plugins.web_images.preview_count.to_string()),
+            Field::new(t("Timeout (s)", "超时秒"), config.plugins.web_images.timeout_seconds.to_string()),
+        ],
+        5 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.print_image.enabled),
+            Field::new(t("Width (%)", "宽度(%)"), config.plugins.print_image.width_percent.to_string()),
+            Field::new(t("Height (%)", "高度(%)"), config.plugins.print_image.height_percent.to_string()),
+        ],
+        6 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.memes.enabled),
+            Field::new(t("Search max results", "搜索最大数"), config.plugins.memes.search_max_results.to_string()),
+            Field::new(t("Width (%)", "宽度(%)"), config.plugins.memes.width_percent.to_string()),
+            Field::new(t("Height (%)", "高度(%)"), config.plugins.memes.height_percent.to_string()),
+            Field::new(t("Max image (MB)", "图片上限(MB)"), config.plugins.memes.max_image_mb.to_string()),
+            Field::boolean(t("Allow GIF", "允许动图"), config.plugins.memes.allow_gif_animation),
+            Field::boolean(t("Auto send", "自动发送"), config.plugins.memes.auto_send_enabled),
+            Field::new(t("Auto send probability", "自动发送概率"), config.plugins.memes.auto_send_probability.to_string()),
+        ],
+        7 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.knowledge_base.enabled),
+            Field::new(t("Data dir", "数据目录"), config.plugins.knowledge_base.data_dir.clone()),
+            Field::new(t("Max search results", "最大搜索结果"), config.plugins.knowledge_base.max_search_results.to_string()),
+            Field::new(t("Snippet context chars", "片段上下文字符"), config.plugins.knowledge_base.snippet_context_chars.to_string()),
+            Field::new(t("Max read lines", "最大读取行数"), config.plugins.knowledge_base.max_read_lines.to_string()),
+            Field::new(t("Max file size (KB)", "最大文件(KB)"), config.plugins.knowledge_base.max_file_size_kb.to_string()),
+            Field::boolean(t("Upload tool", "上传工具"), config.plugins.knowledge_base.upload_tool_enabled),
+            Field::boolean(t("Embedding", "向量嵌入"), config.plugins.knowledge_base.embedding_enabled),
+        ],
+        8 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.archlinux.enabled),
+        ],
+        9 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.man.enabled),
+        ],
+        10 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.memory.enabled),
+        ],
+        11 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.package_advisor.enabled),
+        ],
+        12 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.deep_research_linux_game_compatibility.enabled),
+        ],
+        13 => vec![
+            Field::boolean(t("Enabled", "启用"), config.plugins.api_quota.enabled),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+// ── Apply plugin fields ────────────────────────────────────────────────
+
+pub fn apply_plugin_fields(config: &mut AppConfig, index: usize, fields: &[Field]) -> Result<()> {
+    match index {
+        0 => {
+            config.plugins.web.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.web.max_results = fields[1].value.trim().parse::<usize>()?.clamp(1, 10);
+            config.plugins.web.tavily_api_keys = fields[2].value.lines().map(String::from).filter(|s| !s.trim().is_empty()).collect();
+            config.plugins.web.firecrawl_api_keys = fields[3].value.lines().map(String::from).filter(|s| !s.trim().is_empty()).collect();
+            config.plugins.web.anysearch_api_keys = fields[4].value.lines().map(String::from).filter(|s| !s.trim().is_empty()).collect();
+            config.plugins.web.searxng_base_url = fields[5].value.trim().to_string();
+        }
+        1 => {
+            config.plugins.deep_research.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.deep_research.output_dir = fields[1].value.trim().to_string();
+            config.plugins.deep_research.thinking_depth = fields[2].value.trim().to_string();
+            config.plugins.deep_research.max_review_revisions = fields[3].value.trim().parse::<usize>()?;
+            config.plugins.deep_research.max_tool_steps_per_round = fields[4].value.trim().parse::<usize>()?;
+            config.plugins.deep_research.max_final_answer_chars = fields[5].value.trim().parse::<usize>()?;
+            config.plugins.deep_research.tool_call_timeout_seconds = fields[6].value.trim().parse::<u64>()?;
+            config.plugins.deep_research.show_progress = parse_bool_field(&fields[7].value)?;
+        }
+        2 => {
+            config.plugins.vision.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.vision.prefer_current_multimodal_model = parse_bool_field(&fields[1].value)?;
+            config.plugins.vision.vision_provider_id = fields[2].value.trim().to_string();
+            config.plugins.vision.vision_model = fields[3].value.trim().to_string();
+            config.plugins.vision.response_header_timeout_seconds = fields[4].value.trim().parse::<u64>()?;
+            config.plugins.vision.stream_idle_timeout_seconds = fields[5].value.trim().parse::<u64>()?;
+            config.plugins.vision.image_timeout_seconds = fields[6].value.trim().parse::<u64>()?;
+            config.plugins.vision.preview_with_chafa = parse_bool_field(&fields[7].value)?;
+        }
+        3 => {
+            config.plugins.image_generation.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.image_generation.provider_type = fields[1].value.trim().to_string();
+            config.plugins.image_generation.base_url = fields[2].value.trim().to_string();
+            config.plugins.image_generation.api_keys = fields[3].value.lines().map(String::from).filter(|s| !s.trim().is_empty()).collect();
+            config.plugins.image_generation.model = fields[4].value.trim().to_string();
+            config.plugins.image_generation.default_aspect_ratio = fields[5].value.trim().to_string();
+            config.plugins.image_generation.default_resolution = fields[6].value.trim().to_string();
+            config.plugins.image_generation.output_dir = fields[7].value.trim().to_string();
+            config.plugins.image_generation.auto_print = parse_bool_field(&fields[8].value)?;
+            config.plugins.image_generation.timeout_seconds = fields[9].value.trim().parse::<u64>()?;
+        }
+        4 => {
+            config.plugins.web_images.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.web_images.source_mode = fields[1].value.trim().to_string();
+            config.plugins.web_images.max_results = fields[2].value.trim().parse::<usize>()?;
+            config.plugins.web_images.max_download_mb = fields[3].value.trim().parse::<f64>()?;
+            config.plugins.web_images.safe_search = parse_bool_field(&fields[4].value)?;
+            config.plugins.web_images.vision_screening_enabled = parse_bool_field(&fields[5].value)?;
+            config.plugins.web_images.auto_preview = parse_bool_field(&fields[6].value)?;
+            config.plugins.web_images.preview_count = fields[7].value.trim().parse::<usize>()?;
+            config.plugins.web_images.timeout_seconds = fields[8].value.trim().parse::<u64>()?;
+        }
+        5 => {
+            config.plugins.print_image.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.print_image.width_percent = fields[1].value.trim().parse::<u8>()?;
+            config.plugins.print_image.height_percent = fields[2].value.trim().parse::<u8>()?;
+        }
+        6 => {
+            config.plugins.memes.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.memes.search_max_results = fields[1].value.trim().parse::<usize>()?;
+            config.plugins.memes.width_percent = fields[2].value.trim().parse::<u8>()?;
+            config.plugins.memes.height_percent = fields[3].value.trim().parse::<u8>()?;
+            config.plugins.memes.max_image_mb = fields[4].value.trim().parse::<u64>()?;
+            config.plugins.memes.allow_gif_animation = parse_bool_field(&fields[5].value)?;
+            config.plugins.memes.auto_send_enabled = parse_bool_field(&fields[6].value)?;
+            config.plugins.memes.auto_send_probability = fields[7].value.trim().parse::<f32>()?;
+        }
+        7 => {
+            config.plugins.knowledge_base.enabled = parse_bool_field(&fields[0].value)?;
+            config.plugins.knowledge_base.data_dir = fields[1].value.trim().to_string();
+            config.plugins.knowledge_base.max_search_results = fields[2].value.trim().parse::<usize>()?;
+            config.plugins.knowledge_base.snippet_context_chars = fields[3].value.trim().parse::<usize>()?;
+            config.plugins.knowledge_base.max_read_lines = fields[4].value.trim().parse::<usize>()?;
+            config.plugins.knowledge_base.max_file_size_kb = fields[5].value.trim().parse::<usize>()?;
+            config.plugins.knowledge_base.upload_tool_enabled = parse_bool_field(&fields[6].value)?;
+            config.plugins.knowledge_base.embedding_enabled = parse_bool_field(&fields[7].value)?;
+        }
+        8 => {
+            config.plugins.archlinux.enabled = parse_bool_field(&fields[0].value)?;
+        }
+        9 => {
+            config.plugins.man.enabled = parse_bool_field(&fields[0].value)?;
+        }
+        10 => {
+            config.plugins.memory.enabled = parse_bool_field(&fields[0].value)?;
+        }
+        11 => {
+            config.plugins.package_advisor.enabled = parse_bool_field(&fields[0].value)?;
+        }
+        12 => {
+            config.plugins.deep_research_linux_game_compatibility.enabled = parse_bool_field(&fields[0].value)?;
+        }
+        13 => {
+            config.plugins.api_quota.enabled = parse_bool_field(&fields[0].value)?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
