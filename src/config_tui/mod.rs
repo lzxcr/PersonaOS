@@ -161,6 +161,7 @@ impl<'a> App<'a> {
             Screen::TextModel => self.draw_text_model(frame, main_area, &theme),
             Screen::MultimodalModel => self.draw_multimodal(frame, main_area, &theme),
             Screen::SubagentTiers => self.draw_subagent(frame, main_area, &theme),
+            Screen::Providers => self.draw_providers(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
             _ => self.draw_placeholder(frame, main_area, &theme),
         }
@@ -376,6 +377,147 @@ impl<'a> App<'a> {
         frame.render_stateful_widget(list, layout[2], &mut self.subagent.state);
     }
 
+    fn draw_providers(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let inner = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3),
+        };
+
+        // ── Edit mode: field form ──────────────────────────────────────
+        if self.providers.editing {
+            let Some(selected) = self.providers.state.selected() else {
+                return;
+            };
+            let Some(provider) = self.config.providers.get(selected) else {
+                return;
+            };
+            let field = pages::providers::EDITABLE_FIELDS
+                [self.providers.edit_field.min(pages::providers::EDITABLE_FIELDS.len() - 1)];
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+
+            let value = pages::providers::field_value(provider, self.providers.edit_field);
+            let value_display = if field == "api_key" {
+                // 展示脱敏后的 key 或环境变量名。
+                if value.starts_with("sk-") {
+                    format!("{}…", &value[..6.min(value.len())])
+                } else {
+                    value.clone()
+                }
+            } else {
+                value.clone()
+            };
+
+            let label_line = Line::from(vec![
+                Span::styled(
+                    format!(" {field} "),
+                    Style::default()
+                        .fg(theme.primary_fg)
+                        .bg(theme.primary_container_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" 当前: {value_display}")),
+            ]);
+            frame.render_widget(Paragraph::new(label_line), layout[0]);
+
+            let hint = Line::from(format!(
+                " 输入新值后按 Enter 应用  ↑↓ 切换字段  n 下一字段  Esc 返回列表 "
+            ));
+            frame.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+                layout[1],
+            );
+
+            let input_box = Paragraph::new(self.providers.edit_buffer.clone())
+                .block(Block::bordered().border_type(BorderType::Rounded))
+                .style(Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg));
+            frame.render_widget(input_box, layout[2]);
+
+            let help_line = Line::from(format!(
+                " 字段 {} / {} ",
+                self.providers.edit_field + 1,
+                pages::providers::EDITABLE_FIELDS.len()
+            ));
+            frame.render_widget(
+                Paragraph::new(help_line).style(Style::default().fg(theme.on_surface_variant)),
+                layout[3],
+            );
+            return;
+        }
+
+        // ── List mode ──────────────────────────────────────────────────
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" 供应商和模型 ")
+            .title_alignment(Alignment::Center)
+            .border_style(Style::default().fg(theme.outline))
+            .style(Style::default().bg(theme.surface_bg));
+
+        let rows = pages::providers::provider_rows(
+            &self.config.providers,
+            &self.config.active_provider,
+        );
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let hint = if self.providers.confirming_delete {
+            Line::from(" 确认删除? y 删除  n 取消 ")
+        } else {
+            Line::from(" ↑↓ 导航  Enter 编辑  a 添加  d 删除  s 设为当前  Esc 返回 ")
+        };
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[0],
+        );
+
+        let items: Vec<ListItem> = if rows.is_empty() {
+            vec![ListItem::new("  （无供应商，按 a 添加）")
+                .style(Style::default().fg(theme.on_surface_variant))]
+        } else {
+            rows.iter()
+                .map(|row| {
+                    ListItem::new(Line::from(format!(" {row}")))
+                        .style(Style::default().fg(theme.on_surface))
+                })
+                .collect()
+        };
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" ▸ ");
+
+        frame.render_stateful_widget(list, layout[1], &mut self.providers.state);
+
+        let footer = Line::from(format!(" 当前: {}", self.config.active_provider));
+        frame.render_widget(
+            Paragraph::new(footer).style(Style::default().fg(theme.on_surface_variant)),
+            layout[2],
+        );
+    }
+
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -436,6 +578,7 @@ impl<'a> App<'a> {
                 Screen::TextModel => return Ok(Some(self.handle_text_model_key(code))),
                 Screen::MultimodalModel => return Ok(Some(self.handle_multimodal_key(code))),
                 Screen::SubagentTiers => return Ok(Some(self.handle_subagent_key(code))),
+                Screen::Providers => return Ok(Some(self.handle_providers_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -652,6 +795,169 @@ impl<'a> App<'a> {
                 AppEvent::None
             }
             _ => AppEvent::None,
+        }
+    }
+
+    fn handle_providers_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        // ── Edit mode ──────────────────────────────────────────────────
+        if self.providers.editing {
+            return match code {
+                KeyCode::Esc => {
+                    self.providers.editing = false;
+                    self.providers.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let selected = self.providers.state.selected().unwrap_or(0);
+                    let field = self.providers.edit_field;
+                    let value = self.providers.edit_buffer.clone();
+                    if let Some(provider) = self.config.providers.get_mut(selected) {
+                        let changed = pages::providers::apply_field(provider, field, &value);
+                        if changed {
+                            self.dirty = true;
+                        }
+                    }
+                    // 若编辑的是 id，保持选中位置。
+                    self.providers.editing = false;
+                    self.providers.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.providers.edit_field =
+                        self.providers.edit_field.saturating_sub(1);
+                    self.reload_provider_edit_buffer();
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('n') => {
+                    self.providers.edit_field = (self.providers.edit_field + 1)
+                        .min(pages::providers::EDITABLE_FIELDS.len() - 1);
+                    self.reload_provider_edit_buffer();
+                    AppEvent::None
+                }
+                KeyCode::Backspace => {
+                    self.providers.edit_buffer.pop();
+                    AppEvent::None
+                }
+                KeyCode::Char(c) => {
+                    self.providers.edit_buffer.push(c);
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── Confirm delete mode ─────────────────────────────────────────
+        if self.providers.confirming_delete {
+            return match code {
+                KeyCode::Char('y') => {
+                    let selected = self.providers.state.selected().unwrap_or(0);
+                    let removed_id = self
+                        .config
+                        .providers
+                        .get(selected)
+                        .map(|p| p.id.clone());
+                    if let Some(id) = removed_id {
+                        if self.config.active_provider == id {
+                            self.config.active_provider.clear();
+                        }
+                        self.config.providers.remove(selected);
+                        self.dirty = true;
+                        let i = self.providers.state.selected().unwrap_or(0);
+                        self.providers
+                            .state
+                            .select(Some(i.saturating_sub(1)));
+                    }
+                    self.providers.confirming_delete = false;
+                    AppEvent::None
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.providers.confirming_delete = false;
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        // ── List mode ──────────────────────────────────────────────────
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Up | KeyCode::Char('k') => {
+                let i = self.providers.state.selected().unwrap_or(0);
+                self.providers.state.select(Some(i.saturating_sub(1)));
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let i = self.providers.state.selected().unwrap_or(0);
+                let next = (i + 1).min(self.config.providers.len().saturating_sub(1));
+                self.providers.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                self.reload_provider_edit_buffer();
+                self.providers.editing = true;
+                AppEvent::None
+            }
+            KeyCode::Char('a') => {
+                self.add_provider_from_template();
+                AppEvent::None
+            }
+            KeyCode::Char('d') => {
+                if !self.config.providers.is_empty() {
+                    self.providers.confirming_delete = true;
+                }
+                AppEvent::None
+            }
+            KeyCode::Char('s') => {
+                if let Some(i) = self.providers.state.selected() {
+                    if let Some(provider) = self.config.providers.get(i) {
+                        self.config.active_provider = provider.id.clone();
+                        self.dirty = true;
+                    }
+                }
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
+
+    /// 将选中供应商的当前字段值载入编辑缓冲。
+    fn reload_provider_edit_buffer(&mut self) {
+        let selected = self.providers.state.selected().unwrap_or(0);
+        self.providers.edit_buffer.clear();
+        if let Some(provider) = self.config.providers.get(selected) {
+            self.providers.edit_buffer =
+                pages::providers::field_value(provider, self.providers.edit_field);
+        }
+    }
+
+    /// 从模板列表添加下一个未配置的供应商。
+    fn add_provider_from_template(&mut self) {
+        let templates = crate::config::ProviderConfig::default_templates();
+        let existing: Vec<&str> = self
+            .config
+            .providers
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect();
+        let Some(template) = templates
+            .into_iter()
+            .find(|template| !existing.contains(&template.id.as_str()))
+        else {
+            return;
+        };
+        let new_id = template.id.clone();
+        self.config.providers.push(template);
+        self.config.providers.sort_by(|a, b| a.id.cmp(&b.id));
+        self.dirty = true;
+        if let Some(i) = self
+            .config
+            .providers
+            .iter()
+            .position(|p| p.id == new_id)
+        {
+            self.providers.state.select(Some(i));
         }
     }
 }
