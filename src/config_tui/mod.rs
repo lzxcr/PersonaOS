@@ -645,7 +645,7 @@ impl<'a> App<'a> {
 
         // ── Detail edit mode ────────────────────────────────────────────
         if self.plugins.editing {
-            let mut fields = self.plugins.current_fields(&self.config);
+            let fields = self.plugins.current_fields(&self.config);
             let field_idx = self.plugins.edit_field.min(fields.len().saturating_sub(1));
             if field_idx >= fields.len() {
                 return;
@@ -973,12 +973,6 @@ impl<'a> App<'a> {
 
         // ── Creating / Renaming mode ────────────────────────────────────
         if self.prompts.creating || self.prompts.renaming {
-            let action = if self.prompts.creating { t("Create", "新建") } else { t("Rename", "重命名") };
-            let block = Block::bordered().border_type(BorderType::Rounded)
-                .title(format!(" {action} {} ", t("persona", "人格")))
-                .title_alignment(Alignment::Center)
-                .border_style(Style::default().fg(theme.outline))
-                .style(Style::default().bg(theme.surface_bg));
 
             let layout = Layout::default().direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Length(3), Constraint::Length(1)])
