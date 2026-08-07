@@ -83,7 +83,7 @@ impl<'a> App<'a> {
             multimodal: pages::multimodal::MultimodalPage::default(),
             subagent: pages::subagent::SubagentPage::default(),
             providers: pages::providers::ProvidersPage::default(),
-            plugins: pages::plugins::PluginsPage::default(),
+            plugins: pages::plugins::PluginsPage::new(),
             prompts: pages::prompts::PromptsPage::default(),
             platforms: pages::platforms::PlatformsPage::default(),
             global: pages::global::GlobalPage::default(),
@@ -637,6 +637,12 @@ impl<'a> App<'a> {
             height: area.height.saturating_sub(3),
         };
 
+        // ── API Quota mode ──────────────────────────────────────────────
+        if self.plugins.quota_active {
+            self.draw_quota(frame, inner, theme);
+            return;
+        }
+
         // ── Detail edit mode ────────────────────────────────────────────
         if self.plugins.editing {
             let mut fields = self.plugins.current_fields(&self.config);
@@ -733,6 +739,87 @@ impl<'a> App<'a> {
             .highlight_symbol(" ▸ ");
 
         frame.render_stateful_widget(list, layout[1], &mut self.plugins.state);
+    }
+
+    fn draw_quota(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let provider = pages::plugins::QUOTA_PROVIDERS[self.plugins.quota_provider];
+        let accounts = pages::plugins::quota_accounts(&self.config, self.plugins.quota_provider);
+        let account_idx = self.plugins.edit_field.min(accounts.len().saturating_sub(1));
+        let editing = self.plugins.editing;
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Min(5),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+        // Header
+        let header = Line::from(vec![
+            Span::styled(
+                format!(" {provider} API Quota "),
+                Style::default().fg(theme.primary_fg).bg(theme.primary_container_bg).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!("  {} {}", t("accounts", "个账号"), accounts.len())),
+        ]);
+        frame.render_widget(Paragraph::new(header), layout[0]);
+
+        let hint = if editing {
+            let field_name = if self.plugins.quota_field_idx == 0 { "name" } else { "API key" };
+            Line::from(format!(" {}: {}  Enter apply  Esc back ", t("Editing", "编辑"), field_name))
+        } else {
+            Line::from(t(
+                " ↑↓ navigate  Enter edit  Tab switch provider  a add  d delete  Esc back ",
+                " ↑↓ 导航  Enter 编辑  Tab 切换供应商  a 添加  d 删除  Esc 返回 ",
+            ))
+        };
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[1],
+        );
+
+        // Account list
+        let items: Vec<ListItem> = if accounts.is_empty() {
+            vec![ListItem::new(t("  (no accounts, press a to add)", "  （无账号，按 a 添加）"))
+                .style(Style::default().fg(theme.on_surface_variant))]
+        } else {
+            accounts.iter().enumerate().map(|(i, account)| {
+                let mark = if i == account_idx && editing { "▶ " } else { "  " };
+                let name_display = if editing && i == account_idx {
+                    format!("{}{} = {}", mark, account.name, self.plugins.edit_buffer)
+                } else {
+                    let key_hint = if account.api_key.is_empty() { "" } else { " ***" };
+                    format!("{mark}{}{key_hint}", account.name)
+                };
+                ListItem::new(Line::from(name_display))
+                    .style(Style::default().fg(theme.on_surface))
+            }).collect()
+        };
+
+        let list = List::new(items)
+            .block(Block::bordered().border_type(BorderType::Rounded).title(format!(" {provider} ")).title_alignment(Alignment::Center)
+                .border_style(Style::default().fg(theme.outline)).style(Style::default().bg(theme.surface_bg)))
+            .highlight_style(Style::default().fg(theme.primary_fg).bg(theme.primary_container_bg).add_modifier(Modifier::BOLD))
+            .highlight_symbol(" ▸ ");
+
+        let mut state = self.plugins.state.clone();
+        state.select(Some(account_idx));
+        frame.render_stateful_widget(list, layout[2], &mut state);
+        self.plugins.state = state;
+
+        // Footer
+        let footer = if editing {
+            Line::from(t(" ↑↓ switch field (name / key)", " ↑↓ 切换字段 (名称 / 密钥)"))
+        } else {
+            Line::from(format!(" {} {}", t("Provider:", "供应商:"), provider))
+        };
+        frame.render_widget(
+            Paragraph::new(footer).style(Style::default().fg(theme.on_surface_variant)),
+            layout[3],
+        );
     }
 
     fn draw_platforms(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
@@ -1383,6 +1470,11 @@ impl<'a> App<'a> {
     fn handle_plugins_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
         use crossterm::event::KeyCode;
 
+        // ── API Quota mode ──────────────────────────────────────────────
+        if self.plugins.quota_active {
+            return self.handle_quota_key(code);
+        }
+
         // ── Detail edit mode ────────────────────────────────────────────
         if self.plugins.editing {
             let mut fields = self.plugins.current_fields(&self.config);
@@ -1483,11 +1575,110 @@ impl<'a> App<'a> {
             }
             KeyCode::Enter => {
                 let i = self.plugins.state.selected().unwrap_or(0);
+                if i == 13 {
+                    // api_quota: enter quota management mode
+                    self.plugins.quota_active = true;
+                    self.plugins.edit_field = 0;
+                    self.plugins.edit_buffer.clear();
+                    self.plugins.editing = false;
+                    return AppEvent::None;
+                }
                 // Load first field value into edit buffer for quick editing
                 let fields = pages::plugins::plugin_fields(&self.config, i);
                 self.plugins.edit_field = 0;
                 self.plugins.edit_buffer = fields.first().map(|f| f.value.clone()).unwrap_or_default();
                 self.plugins.editing = true;
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
+
+    fn handle_quota_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        if self.plugins.editing {
+            return match code {
+                KeyCode::Esc => {
+                    self.plugins.editing = false;
+                    self.plugins.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let value = self.plugins.edit_buffer.clone();
+                    let idx = self.plugins.edit_field;
+                    pages::plugins::quota_set_account_field(
+                        &mut self.config,
+                        self.plugins.quota_provider,
+                        idx,
+                        self.plugins.quota_field_idx,
+                        &value,
+                    );
+                    self.dirty = true;
+                    self.plugins.editing = false;
+                    self.plugins.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.plugins.quota_field_idx = self.plugins.quota_field_idx.saturating_sub(1);
+                    AppEvent::None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.plugins.quota_field_idx = (self.plugins.quota_field_idx + 1).min(1);
+                    AppEvent::None
+                }
+                KeyCode::Backspace => { self.plugins.edit_buffer.pop(); AppEvent::None }
+                KeyCode::Char(c) => { self.plugins.edit_buffer.push(c); AppEvent::None }
+                _ => AppEvent::None,
+            };
+        }
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.plugins.quota_active = false;
+                AppEvent::None
+            }
+            KeyCode::Tab => {
+                self.plugins.quota_provider = (self.plugins.quota_provider + 1) % 2;
+                self.plugins.edit_field = 0;
+                AppEvent::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let count = pages::plugins::quota_accounts(&self.config, self.plugins.quota_provider).len();
+                let next = (self.plugins.edit_field + 1).min(count.saturating_sub(1));
+                self.plugins.edit_field = next;
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let idx = self.plugins.edit_field;
+                let count = pages::plugins::quota_accounts(&self.config, self.plugins.quota_provider).len();
+                if idx < count {
+                    let field_val = pages::plugins::quota_account_field(
+                        &self.config, self.plugins.quota_provider, idx, self.plugins.quota_field_idx,
+                    );
+                    self.plugins.edit_buffer = field_val;
+                    self.plugins.editing = true;
+                }
+                AppEvent::None
+            }
+            KeyCode::Char('a') => {
+                pages::plugins::quota_add_account(&mut self.config, self.plugins.quota_provider);
+                self.dirty = true;
+                AppEvent::None
+            }
+            KeyCode::Char('d') => {
+                let idx = self.plugins.edit_field;
+                if pages::plugins::quota_delete_account(&mut self.config, self.plugins.quota_provider, idx).is_some() {
+                    self.dirty = true;
+                }
+                let count = pages::plugins::quota_accounts(&self.config, self.plugins.quota_provider).len();
+                if self.plugins.edit_field >= count.saturating_sub(1) {
+                    self.plugins.edit_field = count.saturating_sub(2);
+                }
                 AppEvent::None
             }
             _ => AppEvent::None,

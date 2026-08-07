@@ -6,13 +6,15 @@ use anyhow::{bail, Result};
 use ratatui::widgets::ListState;
 
 /// 页面状态。
-#[derive(Default)]
 pub struct PluginsPage {
     pub state: ListState,
-    /// 详情编辑模式：true 时编辑当前插件的字段。
     pub editing: bool,
     pub edit_field: usize,
     pub edit_buffer: String,
+    /// API quota 子页
+    pub quota_active: bool,
+    pub quota_provider: usize, // 0=deepseek, 1=openrouter
+    pub quota_field_idx: usize, // 0=name, 1=api_key
 }
 
 impl PluginsPage {
@@ -24,6 +26,9 @@ impl PluginsPage {
             editing: false,
             edit_field: 0,
             edit_buffer: String::new(),
+            quota_active: false,
+            quota_provider: 0,
+            quota_field_idx: 0,
         }
     }
 
@@ -110,6 +115,93 @@ pub fn plugin_rows(config: &AppConfig) -> Vec<String> {
             format!("[{mark}] {name:<14} — {desc} ({id})")
         })
         .collect()
+}
+
+// ── API Quota management ──────────────────────────────────────────────
+
+/// Quota 供应商标签。
+pub const QUOTA_PROVIDERS: [&str; 2] = ["DeepSeek", "OpenRouter"];
+
+/// 获取指定供应商的账号列表。
+pub fn quota_accounts<'a>(config: &'a AppConfig, provider: usize) -> &'a [crate::config::ApiQuotaAccountConfig] {
+    match provider {
+        0 => &config.plugins.api_quota.deepseek.accounts,
+        1 => &config.plugins.api_quota.openrouter.accounts,
+        _ => &[],
+    }
+}
+
+/// 删除指定账号；返回删除的账号名。
+pub fn quota_delete_account(config: &mut AppConfig, provider: usize, index: usize) -> Option<String> {
+    let accounts = match provider {
+        0 => &mut config.plugins.api_quota.deepseek.accounts,
+        1 => &mut config.plugins.api_quota.openrouter.accounts,
+        _ => return None,
+    };
+    if index < accounts.len() {
+        let name = accounts[index].name.clone();
+        accounts.remove(index);
+        Some(name)
+    } else {
+        None
+    }
+}
+
+/// 添加新账号（自动生成 id 和默认名）。
+pub fn quota_add_account(config: &mut AppConfig, provider: usize) {
+    let accounts = match provider {
+        0 => &mut config.plugins.api_quota.deepseek.accounts,
+        1 => &mut config.plugins.api_quota.openrouter.accounts,
+        _ => return,
+    };
+    let next_id = (accounts.len() + 1).to_string();
+    let next_name = format!("账号 {next_id}");
+    accounts.push(crate::config::ApiQuotaAccountConfig {
+        id: next_id,
+        name: next_name,
+        api_key: String::new(),
+    });
+}
+
+/// 获取指定账号的字段值（0=name, 1=api_key）。
+pub fn quota_account_field(
+    config: &AppConfig,
+    provider: usize,
+    index: usize,
+    field: usize,
+) -> String {
+    let accounts = match provider {
+        0 => &config.plugins.api_quota.deepseek.accounts,
+        1 => &config.plugins.api_quota.openrouter.accounts,
+        _ => return String::new(),
+    };
+    match (accounts.get(index), field) {
+        (Some(account), 0) => account.name.clone(),
+        (Some(account), 1) => account.api_key.clone(),
+        _ => String::new(),
+    }
+}
+
+/// 设置指定账号的字段值。
+pub fn quota_set_account_field(
+    config: &mut AppConfig,
+    provider: usize,
+    index: usize,
+    field: usize,
+    value: &str,
+) {
+    let accounts = match provider {
+        0 => &mut config.plugins.api_quota.deepseek.accounts,
+        1 => &mut config.plugins.api_quota.openrouter.accounts,
+        _ => return,
+    };
+    if let Some(account) = accounts.get_mut(index) {
+        match field {
+            0 => account.name = value.to_string(),
+            1 => account.api_key = value.to_string(),
+            _ => {}
+        }
+    }
 }
 
 // ── Field abstraction ──────────────────────────────────────────────────
