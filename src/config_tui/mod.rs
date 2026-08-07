@@ -16,7 +16,6 @@ use ratatui::{
     widgets::{Block, BorderType, List, ListItem, ListState, Paragraph},
     DefaultTerminal, Frame,
 };
-
 pub fn run(paths: &PersonaPaths) -> Result<bool> {
     AppConfig::init_files(paths)?;
     crate::models_cache::try_load(paths);
@@ -160,6 +159,7 @@ impl<'a> App<'a> {
         match self.screen {
             Screen::MainMenu => self.draw_main_menu(frame, main_area, &theme),
             Screen::TextModel => self.draw_text_model(frame, main_area, &theme),
+            Screen::MultimodalModel => self.draw_multimodal(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
             _ => self.draw_placeholder(frame, main_area, &theme),
         }
@@ -239,94 +239,42 @@ impl<'a> App<'a> {
     }
 
     fn draw_text_model(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
-        let choices = self.config.active_provider_model_choices();
-        let labels: Vec<String> = choices.iter().map(|c| c.label()).collect();
-
-        let inner = Rect {
-            x: area.x.saturating_add(2),
-            y: area.y.saturating_add(1),
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(3),
-        };
-
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title(format!(" {} ", screen_title(&Screen::TextModel)))
-            .title_alignment(Alignment::Center)
-            .border_style(Style::default().fg(theme.outline))
-            .style(Style::default().bg(theme.surface_bg));
-
-        let title = Line::from(vec![
-            Span::raw(" 当前: "),
-            Span::styled(
-                active_label(&self.config),
-                Style::default()
-                    .fg(theme.primary_fg)
-                    .bg(theme.primary_container_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
-
-        // ── Hint line for editing mode ─────────────────────────────────
-        let hint = if self.text_model.editing {
-            Line::from(format!(
-                " 输入 provider/model 后按 Enter 应用（当前输入: {}）",
-                self.text_model.edit_buffer
-            ))
-        } else {
-            Line::from(" ↑↓ 导航  Enter 选择  n 输入新模型  Esc 返回 ")
-        };
-
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Min(3),
-                Constraint::Length(1),
-            ])
-            .split(inner);
-
-        frame.render_widget(
-            Paragraph::new(title).block(Block::new()),
-            layout[0],
+        let labels: Vec<String> = self
+            .config
+            .active_provider_model_choices()
+            .iter()
+            .map(|c| c.label())
+            .collect();
+        draw_model_select(
+            frame,
+            area,
+            theme,
+            "文本模型",
+            &labels,
+            &active_label(&self.config),
+            self.text_model.editing,
+            &self.text_model.edit_buffer,
+            &mut self.text_model.state,
         );
+    }
 
-        let items: Vec<ListItem> = if labels.is_empty() {
-            vec![ListItem::new(
-                "  （无可用模型，请先配置供应商）"
-            ).style(Style::default().fg(theme.on_surface_variant))]
-        } else {
-            labels
-                .iter()
-                .map(|label| {
-                    ListItem::new(Line::from(format!(" {label}")))
-                        .style(Style::default().fg(theme.on_surface))
-                })
-                .collect()
-        };
-
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(
-                Style::default()
-                    .fg(theme.primary_fg)
-                    .bg(theme.primary_container_bg)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol(" ▸ ");
-
-        frame.render_stateful_widget(list, layout[2], &mut self.text_model.state);
-
-        // ── Editing input box ──────────────────────────────────────────
-        let input_style = if self.text_model.editing {
-            Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg)
-        } else {
-            Style::default().fg(theme.on_surface_variant)
-        };
-        frame.render_widget(
-            Paragraph::new(hint).style(input_style),
-            layout[3],
+    fn draw_multimodal(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let labels: Vec<String> = self
+            .config
+            .active_multimodal_provider_model_choices()
+            .iter()
+            .map(|c| c.label())
+            .collect();
+        draw_model_select(
+            frame,
+            area,
+            theme,
+            "多模态模型",
+            &labels,
+            &active_multimodal_label(&self.config),
+            self.multimodal.editing,
+            &self.multimodal.edit_buffer,
+            &mut self.multimodal.state,
         );
     }
 
@@ -388,6 +336,7 @@ impl<'a> App<'a> {
                     _ => {}
                 },
                 Screen::TextModel => return Ok(Some(self.handle_text_model_key(code))),
+                Screen::MultimodalModel => return Ok(Some(self.handle_multimodal_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -477,6 +426,85 @@ impl<'a> App<'a> {
             _ => AppEvent::None,
         }
     }
+
+    fn handle_multimodal_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        if self.multimodal.editing {
+            return match code {
+                KeyCode::Esc => {
+                    self.multimodal.editing = false;
+                    self.multimodal.edit_buffer.clear();
+                    AppEvent::None
+                }
+                KeyCode::Enter => {
+                    let parsed =
+                        pages::multimodal::parse_multimodal_input(&self.multimodal.edit_buffer);
+                    self.multimodal.editing = false;
+                    self.multimodal.edit_buffer.clear();
+                    if let Some(model) = parsed {
+                        self.config.active_multimodal_provider_models = Some(vec![model]);
+                        self.dirty = true;
+                    }
+                    AppEvent::None
+                }
+                KeyCode::Backspace => {
+                    self.multimodal.edit_buffer.pop();
+                    AppEvent::None
+                }
+                KeyCode::Char(c) => {
+                    self.multimodal.edit_buffer.push(c);
+                    AppEvent::None
+                }
+                _ => AppEvent::None,
+            };
+        }
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Up | KeyCode::Char('k') => {
+                let choices = self.config.active_multimodal_provider_model_choices();
+                let i = self.multimodal.state.selected().unwrap_or(0);
+                self.multimodal
+                    .state
+                    .select(Some(i.saturating_sub(1)));
+                if !choices.is_empty() {
+                    self.multimodal.state.select(Some(
+                        self.multimodal.state.selected().unwrap_or(0).min(choices.len() - 1),
+                    ));
+                }
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let choices = self.config.active_multimodal_provider_model_choices();
+                let i = self.multimodal.state.selected().unwrap_or(0);
+                let next = (i + 1).min(choices.len().saturating_sub(1));
+                self.multimodal.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let choices = self.config.active_multimodal_provider_model_choices();
+                if let Some(i) = self.multimodal.state.selected() {
+                    if let Some(choice) = choices.get(i) {
+                        self.config.active_multimodal_provider_models = Some(vec![
+                            ActiveProviderModelConfig {
+                                provider_id: choice.provider_id.clone(),
+                                model: choice.model.clone(),
+                            },
+                        ]);
+                        self.dirty = true;
+                    }
+                }
+                AppEvent::None
+            }
+            KeyCode::Char('n') => {
+                self.multimodal.editing = true;
+                self.multimodal.edit_buffer.clear();
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
 }
 
 const MAIN_MENU_ITEMS: usize = 9;
@@ -522,6 +550,103 @@ fn active_multimodal_label(config: &AppConfig) -> String {
     } else {
         format!("{} 个模型", choices.len())
     }
+}
+
+/// 通用模型选择列表渲染（文本模型/多模态模型共用）。
+#[allow(clippy::too_many_arguments)]
+fn draw_model_select(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &theme::Theme,
+    title: &str,
+    labels: &[String],
+    current: &str,
+    editing: bool,
+    edit_buffer: &str,
+    state: &mut ListState,
+) {
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(3),
+    };
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(format!(" {title} "))
+        .title_alignment(Alignment::Center)
+        .border_style(Style::default().fg(theme.outline))
+        .style(Style::default().bg(theme.surface_bg));
+
+    let title_line = Line::from(vec![
+        Span::raw(" 当前: "),
+        Span::styled(
+            current,
+            Style::default()
+                .fg(theme.primary_fg)
+                .bg(theme.primary_container_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
+    let hint = if editing {
+        Line::from(format!(
+            " 输入 provider/model 后按 Enter 应用（当前输入: {edit_buffer}）"
+        ))
+    } else {
+        Line::from(" ↑↓ 导航  Enter 选择  n 输入新模型  Esc 返回 ")
+    };
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(title_line).block(Block::new()),
+        layout[0],
+    );
+
+    let items: Vec<ListItem> = if labels.is_empty() {
+        vec![ListItem::new("  （无可用模型，请先配置供应商）")
+            .style(Style::default().fg(theme.on_surface_variant))]
+    } else {
+        labels
+            .iter()
+            .map(|label| {
+                ListItem::new(Line::from(format!(" {label}")))
+                    .style(Style::default().fg(theme.on_surface))
+            })
+            .collect()
+    };
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .fg(theme.primary_fg)
+                .bg(theme.primary_container_bg)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(" ▸ ");
+
+    frame.render_stateful_widget(list, layout[2], state);
+
+    let input_style = if editing {
+        Style::default().fg(theme.on_surface).bg(theme.surface_dim_bg)
+    } else {
+        Style::default().fg(theme.on_surface_variant)
+    };
+    frame.render_widget(
+        Paragraph::new(hint).style(input_style),
+        layout[3],
+    );
 }
 
 fn subagent_tiers_label(config: &AppConfig) -> String {
