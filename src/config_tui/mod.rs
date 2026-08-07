@@ -160,6 +160,7 @@ impl<'a> App<'a> {
             Screen::MainMenu => self.draw_main_menu(frame, main_area, &theme),
             Screen::TextModel => self.draw_text_model(frame, main_area, &theme),
             Screen::MultimodalModel => self.draw_multimodal(frame, main_area, &theme),
+            Screen::SubagentTiers => self.draw_subagent(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
             _ => self.draw_placeholder(frame, main_area, &theme),
         }
@@ -278,6 +279,103 @@ impl<'a> App<'a> {
         );
     }
 
+    fn draw_subagent(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let tier = self.subagent.active_tier();
+        let labels: Vec<String> = self
+            .config
+            .provider_model_choices()
+            .into_iter()
+            .map(|choice| {
+                let selected = self.config.is_subagent_tier_model(
+                    tier,
+                    &choice.provider_id,
+                    &choice.model,
+                );
+                format!(
+                    "{} {}",
+                    pages::subagent::choice_mark(selected),
+                    choice.label()
+                )
+            })
+            .collect();
+
+        let inner = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3),
+        };
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(format!(
+                " 子代理档位池 — {} ({}) ",
+                pages::subagent::tier_labels()[self.subagent.tab_index.clamp(0, 2)],
+                pages::subagent::tier_hint(tier)
+            ))
+            .title_alignment(Alignment::Center)
+            .border_style(Style::default().fg(theme.outline))
+            .style(Style::default().bg(theme.surface_bg));
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        // ── Tabs ────────────────────────────────────────────────────────
+        let tabs = ratatui::widgets::Tabs::new(pages::subagent::tier_labels())
+            .block(Block::bordered().border_type(BorderType::Rounded))
+            .style(Style::default().fg(theme.on_surface_variant))
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .select(self.subagent.tab_index.clamp(0, 2));
+        frame.render_widget(tabs, layout[0]);
+
+        let hint = Line::from(format!(
+            " Tab/←→ 切换档位  Enter 选入/移出模型  Esc 返回  — 档位说明: {}",
+            pages::subagent::tier_hint(tier)
+        ));
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[1],
+        );
+
+        // ── Model list ─────────────────────────────────────────────────
+        let items: Vec<ListItem> = if labels.is_empty() {
+            vec![ListItem::new("  （无可用模型，请先配置供应商）")
+                .style(Style::default().fg(theme.on_surface_variant))]
+        } else {
+            labels
+                .iter()
+                .map(|label| {
+                    ListItem::new(Line::from(format!(" {label}")))
+                        .style(Style::default().fg(theme.on_surface))
+                })
+                .collect()
+        };
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" ▸ ");
+
+        frame.render_stateful_widget(list, layout[2], &mut self.subagent.state);
+    }
+
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -337,6 +435,7 @@ impl<'a> App<'a> {
                 },
                 Screen::TextModel => return Ok(Some(self.handle_text_model_key(code))),
                 Screen::MultimodalModel => return Ok(Some(self.handle_multimodal_key(code))),
+                Screen::SubagentTiers => return Ok(Some(self.handle_subagent_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -500,6 +599,56 @@ impl<'a> App<'a> {
             KeyCode::Char('n') => {
                 self.multimodal.editing = true;
                 self.multimodal.edit_buffer.clear();
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
+
+    fn handle_subagent_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                let next = (self.subagent.tab_index + 1).min(2);
+                self.subagent.tab_index = next;
+                self.subagent.state.select(Some(0));
+                AppEvent::None
+            }
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                let prev = self.subagent.tab_index.saturating_sub(1);
+                self.subagent.tab_index = prev;
+                self.subagent.state.select(Some(0));
+                AppEvent::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let i = self.subagent.state.selected().unwrap_or(0);
+                self.subagent.state.select(Some(i.saturating_sub(1)));
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let i = self.subagent.state.selected().unwrap_or(0);
+                let choices = self.config.provider_model_choices();
+                let next = (i + 1).min(choices.len().saturating_sub(1));
+                self.subagent.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let tier = self.subagent.active_tier();
+                let choices = self.config.provider_model_choices();
+                if let Some(i) = self.subagent.state.selected() {
+                    if let Some(choice) = choices.get(i) {
+                        let result = self.config.toggle_subagent_tier_model(
+                            tier,
+                            &choice.provider_id,
+                            &choice.model,
+                        );
+                        if result.is_ok() {
+                            self.dirty = true;
+                        }
+                    }
+                }
                 AppEvent::None
             }
             _ => AppEvent::None,
