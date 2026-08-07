@@ -462,7 +462,7 @@ impl<'a> App<'a> {
         };
         frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
-        let edit_row = if editing { self.providers.edit_field } else { self.providers.state.selected().unwrap_or(0) };
+        let edit_row = self.providers.edit_field;
         let items: Vec<ListItem> = if rows.is_empty() {
             vec![ListItem::new(t("  (No providers, press a to add)", "  （无供应商，按 a 添加）"))
                 .style(Style::default().fg(theme.on_surface_variant))]
@@ -492,10 +492,10 @@ impl<'a> App<'a> {
                 .collect()
         };
 
-        // Use state directly; maintain selection for viewing/edit modes.
-        if editing {
-            self.providers.state.select(Some(edit_row));
-        }
+        // Field list: use a local ListState so self.providers.state keeps
+        // the entity (provider) selection unchanged.
+        let mut field_state = ListState::default();
+        field_state.select(Some(self.providers.edit_field.min(rows.len().saturating_sub(1))));
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -506,7 +506,7 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut self.providers.state);
+        frame.render_stateful_widget(list, layout[1], &mut field_state);
 
         // Footer: position.
         let count = if viewing || editing {
@@ -514,7 +514,11 @@ impl<'a> App<'a> {
         } else {
             self.config.providers.len()
         };
-        let pos_idx = self.providers.state.selected().unwrap_or(0);
+        let pos_idx = if viewing || editing {
+            self.providers.edit_field
+        } else {
+            self.providers.state.selected().unwrap_or(0)
+        };
         frame.render_widget(
             Paragraph::new(Line::from(pages::position_label(pos_idx, count)))
                 .style(Style::default().fg(theme.on_surface_variant)),
@@ -659,7 +663,6 @@ impl<'a> App<'a> {
             let plugin_id = pages::plugins::plugins().get(selected).map(|p| p.0).unwrap_or("?");
             let rows = self.plugins.field_rows(&self.config);
             let editing = self.plugins.editing;
-            let edit_row = self.plugins.edit_field.min(rows.len().saturating_sub(1));
 
             let block = Block::bordered()
                 .border_type(BorderType::Rounded)
@@ -694,7 +697,7 @@ impl<'a> App<'a> {
             };
             frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
-            let edit_row = if editing { self.plugins.edit_field } else { self.plugins.state.selected().unwrap_or(0) };
+            let edit_row = self.plugins.edit_field;
             let items: Vec<ListItem> = rows
                 .iter()
                 .enumerate()
@@ -719,9 +722,8 @@ impl<'a> App<'a> {
                 })
                 .collect();
 
-            if editing {
-                self.plugins.state.select(Some(edit_row));
-            }
+            let mut field_state = ListState::default();
+            field_state.select(Some(self.plugins.edit_field.min(rows.len().saturating_sub(1))));
             let list = List::new(items)
                 .block(block)
                 .highlight_style(
@@ -731,10 +733,10 @@ impl<'a> App<'a> {
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol(" ▌ ");
-            frame.render_stateful_widget(list, layout[1], &mut self.plugins.state);
+            frame.render_stateful_widget(list, layout[1], &mut field_state);
 
             frame.render_widget(
-                Paragraph::new(Line::from(pages::position_label(self.plugins.state.selected().unwrap_or(0), rows.len())))
+                Paragraph::new(Line::from(pages::position_label(self.plugins.edit_field, rows.len())))
                     .style(Style::default().fg(theme.on_surface_variant)),
                 layout[2],
             );
@@ -925,7 +927,7 @@ impl<'a> App<'a> {
         };
         frame.render_widget(Paragraph::new(hint).style(hint_style), layout[0]);
 
-        let edit_row = if editing { self.platforms.edit_field } else { self.platforms.state.selected().unwrap_or(0) };
+        let edit_row = self.platforms.edit_field;
         let items: Vec<ListItem> = rows
             .iter()
             .enumerate()
@@ -951,12 +953,10 @@ impl<'a> App<'a> {
             })
             .collect();
 
-        // Use state directly; set selection for field overview/edit modes.
-        if viewing && !editing {
-            // Keep existing selection from list navigation.
-        } else if editing {
-            self.platforms.state.select(Some(edit_row));
-        }
+        // Field list: use a local ListState so self.platforms.state keeps
+        // the entity (platform) selection unchanged.
+        let mut field_state = ListState::default();
+        field_state.select(Some(self.platforms.edit_field.min(rows.len().saturating_sub(1))));
         let list = List::new(items)
             .block(block)
             .highlight_style(
@@ -967,16 +967,16 @@ impl<'a> App<'a> {
             )
             .highlight_symbol(" ▌ ");
 
-        frame.render_stateful_widget(list, layout[1], &mut self.platforms.state);
+        frame.render_stateful_widget(list, layout[1], &mut field_state);
 
-        // Footer: position.
+        // Footer: position (field position in overview/edit, entity position in list).
         let count = if viewing || editing {
             pages::platforms::platform_field_rows(&self.config, selected).len()
         } else {
             pages::platforms::PLATFORMS.len()
         };
         let pos_idx = if viewing || editing {
-            self.platforms.state.selected().unwrap_or(0)
+            self.platforms.edit_field
         } else {
             self.platforms.state.selected().unwrap_or(0)
         };
@@ -1396,30 +1396,26 @@ impl<'a> App<'a> {
                     AppEvent::None
                 }
                 KeyCode::Enter => {
-                    self.providers.edit_field = self.providers.state.selected().unwrap_or(0);
                     self.reload_provider_edit_buffer();
                     self.providers.editing = true;
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let i = self.providers.state.selected().unwrap_or(0);
-                    self.providers.state.select(Some(i.saturating_sub(1)));
+                    self.providers.edit_field = self.providers.edit_field.saturating_sub(1);
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let i = self.providers.state.selected().unwrap_or(0);
-                    self.providers.state.select(Some((i + 1)
-                        .min(pages::providers::EDITABLE_FIELDS.len() - 1)));
+                    self.providers.edit_field = (self.providers.edit_field + 1)
+                        .min(pages::providers::EDITABLE_FIELDS.len() - 1);
                     AppEvent::None
                 }
                 KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    let i = self.providers.state.selected().unwrap_or(0);
                     if let Some(next) = pages::nav_index(
                         code,
-                        i,
+                        self.providers.edit_field,
                         pages::providers::EDITABLE_FIELDS.len(),
                     ) {
-                        self.providers.state.select(Some(next));
+                        self.providers.edit_field = next;
                     }
                     AppEvent::None
                 }
@@ -1687,26 +1683,22 @@ impl<'a> App<'a> {
                 }
                 KeyCode::Enter => {
                     let fields = self.plugins.current_fields(&self.config);
-                    self.plugins.edit_field = self.plugins.state.selected().unwrap_or(0);
                     self.plugins.edit_buffer = fields.get(self.plugins.edit_field).map(|f| f.value.clone()).unwrap_or_default();
                     self.plugins.editing = true;
                     self.plugins.error_msg = None;
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let i = self.plugins.state.selected().unwrap_or(0);
-                    self.plugins.state.select(Some(i.saturating_sub(1)));
+                    self.plugins.edit_field = self.plugins.edit_field.saturating_sub(1);
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let i = self.plugins.state.selected().unwrap_or(0);
-                    self.plugins.state.select(Some((i + 1).min(field_count.saturating_sub(1))));
+                    self.plugins.edit_field = (self.plugins.edit_field + 1).min(field_count.saturating_sub(1));
                     AppEvent::None
                 }
                 KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    let i = self.plugins.state.selected().unwrap_or(0);
-                    if let Some(next) = pages::nav_index(code, i, field_count) {
-                        self.plugins.state.select(Some(next));
+                    if let Some(next) = pages::nav_index(code, self.plugins.edit_field, field_count) {
+                        self.plugins.edit_field = next;
                     }
                     AppEvent::None
                 }
@@ -2033,7 +2025,6 @@ impl<'a> App<'a> {
                     AppEvent::None
                 }
                 KeyCode::Enter => {
-                    self.platforms.edit_field = self.platforms.state.selected().unwrap_or(0);
                     self.platforms.edit_buffer = pages::platforms::platform_field_value(
                         &self.config, selected, self.platforms.edit_field,
                     );
@@ -2041,19 +2032,16 @@ impl<'a> App<'a> {
                     AppEvent::None
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let i = self.platforms.state.selected().unwrap_or(0);
-                    self.platforms.state.select(Some(i.saturating_sub(1)));
+                    self.platforms.edit_field = self.platforms.edit_field.saturating_sub(1);
                     AppEvent::None
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let i = self.platforms.state.selected().unwrap_or(0);
-                    self.platforms.state.select(Some((i + 1).min(field_count.saturating_sub(1))));
+                    self.platforms.edit_field = (self.platforms.edit_field + 1).min(field_count.saturating_sub(1));
                     AppEvent::None
                 }
                 KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-                    let i = self.platforms.state.selected().unwrap_or(0);
-                    if let Some(next) = pages::nav_index(code, i, field_count) {
-                        self.platforms.state.select(Some(next));
+                    if let Some(next) = pages::nav_index(code, self.platforms.edit_field, field_count) {
+                        self.platforms.edit_field = next;
                     }
                     AppEvent::None
                 }
