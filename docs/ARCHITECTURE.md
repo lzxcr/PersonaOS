@@ -96,7 +96,13 @@ src/
 ├── config_tui/        # TUI 配置界面 (ratatui + MD3 主题)
 │   ├── mod.rs         #   主应用路由 / 事件循环
 │   ├── theme.rs       #   MD3 暗/亮双主题
-│   └── pages/         #   8 个子页面 (模型/供应商/插件/平台/全局/提示词)
+│   └── pages/         #   8 个子页面 (模型/子代理/供应商/插件/平台/提示词/全局)
+│       ├── providers.rs   # 供应商 CRUD + 模型池
+│       ├── plugins.rs     # 插件开关 + 详情字段编辑 + API 额度多账号
+│       ├── platforms.rs   # 平台开关 + QQ 高级配置
+│       ├── prompts.rs     # 人格列表 + CRUD
+│       ├── global.rs      # 14 项全局参数
+│       └── ...            # 文本/多模态/子代理档位
 ├── question.rs        # 终端交互式问答
 ├── clipboard.rs       # 剪切板
 ├── token_counter.rs   # token 计数
