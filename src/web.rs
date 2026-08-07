@@ -110,7 +110,11 @@ pub(crate) struct DaemonState {
 impl DaemonState {
     pub(crate) fn for_test(paths: PersonaPaths, web_port: u16) -> Result<Self> {
         let state_store = StateStore::new(&paths)?;
-        let config = AppConfig::default();
+        let mut config = AppConfig::default();
+        // 测试环境给默认 provider 一个可解析的 key。
+        if let Some(provider) = config.providers.first_mut() {
+            provider.api_key = Some("sk-test-key".to_string());
+        }
         let context = cold_context(&config, &state_store)?;
         let manager = Arc::new(Mutex::new(ManagerState {
             config,

@@ -4874,6 +4874,15 @@ mod tests {
 
     struct NoopPlatformAdapter;
 
+    /// 测试用配置：默认 provider 带可解析的 API key。
+    fn test_config() -> AppConfig {
+        let mut config = AppConfig::default();
+        if let Some(provider) = config.providers.first_mut() {
+            provider.api_key = Some("sk-test-key".to_string());
+        }
+        config
+    }
+
     #[test]
     fn plan_allows_presentation_without_allowing_workspace_writes() {
         assert!(mode_allows_tool_permission(
@@ -5394,7 +5403,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
         std::fs::create_dir_all(&paths.config_dir).unwrap();
-        let mut config = AppConfig::default();
+        let mut config = test_config();
         std::fs::create_dir_all(config.identities_dir_path(&paths)).unwrap();
         std::fs::write(config.user_identity_path(&paths), "legacy-owner-marker").unwrap();
 
@@ -5431,7 +5440,7 @@ mod tests {
     fn runtime_system_context_refreshes_the_effective_prompt_immediately() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         let client =
             OpenAiCompatibleClient::new(config.provider(None).unwrap(), &config, &paths).unwrap();
@@ -5459,7 +5468,7 @@ mod tests {
     fn structured_platform_context_can_suppress_ambiguous_session_replay() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state
             .start_turn("old", "anonymous old user", 999_999)
@@ -5492,7 +5501,7 @@ mod tests {
 
     #[test]
     fn vision_support_requires_every_effective_text_pool_model() {
-        let mut config = AppConfig::default();
+        let mut config = test_config();
         let provider = config.providers.first_mut().unwrap();
         provider.default_model = "vision-model".to_string();
         provider.models = vec!["vision-model".to_string(), "text-model".to_string()];
@@ -5524,7 +5533,7 @@ mod tests {
 
     #[test]
     fn vision_preference_controls_direct_image_delivery_to_the_text_pool() {
-        let mut config = AppConfig::default();
+        let mut config = test_config();
         let provider = config.providers.first_mut().unwrap();
         provider.model_modalities.insert(
             provider.default_model.clone(),
@@ -5540,7 +5549,7 @@ mod tests {
     async fn platform_images_register_a_turn_scoped_vision_tool() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         let client =
             OpenAiCompatibleClient::new(config.provider(None).unwrap(), &config, &paths).unwrap();
@@ -5577,7 +5586,7 @@ mod tests {
     async fn context_image_ids_register_vision_without_a_current_image() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         let client =
             OpenAiCompatibleClient::new(config.provider(None).unwrap(), &config, &paths).unwrap();
@@ -5746,7 +5755,7 @@ mod tests {
     fn effective_context_tokens_include_tool_definitions() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state.init_files().unwrap();
         let client =
@@ -6086,7 +6095,7 @@ mod tests {
     fn interrupted_redo_replays_prefix_followups_before_new_boundaries() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         let client =
             OpenAiCompatibleClient::new(config.provider(None).unwrap(), &config, &paths).unwrap();
@@ -6281,7 +6290,7 @@ mod tests {
     async fn parallel_task_calls_run_concurrently_and_map_outputs() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state.init_files().unwrap();
         let client =
@@ -6377,7 +6386,7 @@ mod tests {
                 enabled: false,
                 ..AppConfig::default().tools
             },
-            ..AppConfig::default()
+            ..test_config()
         };
         let state = StateStore::new(&paths).unwrap();
         state.init_files().unwrap();
@@ -6429,7 +6438,7 @@ mod tests {
     fn trim_accounts_for_tool_definitions_unloaded_with_a_popped_turn() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let mut config = AppConfig::default();
+        let mut config = test_config();
         config.tools.loading_mode = "hybrid".to_string();
         let state = StateStore::new(&paths).unwrap();
         state.init_files().unwrap();
@@ -6486,7 +6495,7 @@ mod tests {
     fn trim_ignores_stale_loaded_tool_sources_when_persistence_is_disabled() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let mut config = AppConfig::default();
+        let mut config = test_config();
         config.tools.loading_mode = "hybrid".to_string();
         config.tools.persist_loaded_tools = false;
         let state = StateStore::new(&paths).unwrap();
@@ -6541,7 +6550,7 @@ mod tests {
     fn explicit_pop_archives_context_content_but_not_reasoning() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state.start_turn("t1", "promptonlyalpha", 999999).unwrap();
         state
@@ -6576,7 +6585,7 @@ mod tests {
     fn explicit_pop_still_deletes_when_evicted_context_archiving_is_disabled() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let mut config = AppConfig::default();
+        let mut config = test_config();
         config.memory.evicted_context_enabled = false;
         let state = StateStore::new(&paths).unwrap();
         state.start_turn("t1", "unarchived-marker", 999999).unwrap();
@@ -6599,7 +6608,7 @@ mod tests {
     fn explicit_pop_does_not_archive_a_turn_removed_before_commit() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state
             .start_turn("t1", "stale-archive-quasar", 999999)
@@ -6623,7 +6632,7 @@ mod tests {
     fn failed_concurrent_pop_preserves_archive_from_the_successful_pop() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state
             .start_turn("t1", "successful-pop-quasar", 999999)
@@ -6647,7 +6656,7 @@ mod tests {
     fn explicit_pop_removes_new_archive_when_the_turn_still_exists_hidden() {
         let temp = tempfile::tempdir().unwrap();
         let paths = test_paths(temp.path());
-        let config = AppConfig::default();
+        let config = test_config();
         let state = StateStore::new(&paths).unwrap();
         state
             .start_turn("t1", "hidden-stale-quasar", 999999)

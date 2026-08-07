@@ -4763,10 +4763,16 @@ impl AppConfig {
                 bail!("the configured multimodal model pool has no image-capable model");
             }
         }
-        Ok((
-            OPENCODE_PROVIDER_ID.to_string(),
-            "gpt-4o-mini".to_string(),
-        ))
+        // Fallback: active provider's default model.
+        if let Ok(provider) = self.provider(None) {
+            if !provider.default_model.is_empty() {
+                return Ok((provider.id.clone(), provider.default_model.clone()));
+            }
+            if let Some(model) = provider.models.first().cloned() {
+                return Ok((provider.id.clone(), model));
+            }
+        }
+        Ok(("gpt-4o-mini".to_string(), "gpt-4o-mini".to_string()))
     }
 
     /// A tier pool's usable model choices: configured entries filtered to
@@ -5916,7 +5922,7 @@ mod tests {
 
         let choices = config.active_provider_model_choices();
         assert_eq!(choices.len(), 1);
-        assert_eq!(choices[0].provider_id, OPENCODE_PROVIDER_ID);
+        assert_eq!(choices[0].provider_id, config.providers[0].id);
         assert_eq!(choices[0].model, config.providers[0].default_model);
     }
 
@@ -6061,26 +6067,27 @@ mod tests {
     #[test]
     fn vision_provider_choice_prefers_multimodal_pool_then_default_mimo() {
         let mut config = AppConfig::default();
+        let provider_id = config.providers[0].id.clone();
         config.providers[0].models.push("vision-model".to_string());
         config.providers[0].model_modalities.insert(
             "vision-model".to_string(),
             vec!["text".to_string(), "image".to_string()],
         );
         config.active_multimodal_provider_models = Some(vec![ActiveProviderModelConfig {
-            provider_id: OPENCODE_PROVIDER_ID.to_string(),
+            provider_id: provider_id.clone(),
             model: "vision-model".to_string(),
         }]);
 
         assert_eq!(
             config.vision_provider_choice().unwrap(),
-            (OPENCODE_PROVIDER_ID.to_string(), "vision-model".to_string())
+            (provider_id.clone(), "vision-model".to_string())
         );
 
         config.active_multimodal_provider_models = Some(Vec::new());
         assert_eq!(
             config.vision_provider_choice().unwrap(),
             (
-                OPENCODE_PROVIDER_ID.to_string(),
+                provider_id.clone(),
                 "gpt-4o-mini".to_string()
             )
         );
