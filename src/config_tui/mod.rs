@@ -165,8 +165,8 @@ impl<'a> App<'a> {
             Screen::GlobalSettings => self.draw_global(frame, main_area, &theme),
             Screen::Plugins => self.draw_plugins(frame, main_area, &theme),
             Screen::Platforms => self.draw_platforms(frame, main_area, &theme),
+            Screen::Prompts => self.draw_prompts(frame, main_area, &theme),
             Screen::Quit => self.draw_quit(frame, main_area, &theme),
-            _ => self.draw_placeholder(frame, main_area, &theme),
         }
 
         // ── Status bar ─────────────────────────────────────────────────
@@ -785,6 +785,70 @@ impl<'a> App<'a> {
         frame.render_stateful_widget(list, layout[1], &mut self.platforms.state);
     }
 
+    fn draw_prompts(&mut self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
+        let inner = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3),
+        };
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(" 自定义提示词 / 人格 ")
+            .title_alignment(Alignment::Center)
+            .border_style(Style::default().fg(theme.outline))
+            .style(Style::default().bg(theme.surface_bg));
+
+        let active = &self.config.prompt.active_persona;
+        let rows = pages::prompts::persona_rows(self.paths, active);
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let hint = Line::from(" ↑↓ 导航  Enter 激活所选人格  Esc 返回 ");
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(theme.on_surface_variant)),
+            layout[0],
+        );
+
+        let items: Vec<ListItem> = if rows.is_empty() {
+            vec![ListItem::new("  （无可用人格，请在 ~/.pos/data/prompts/ 放置 .md 文件）")
+                .style(Style::default().fg(theme.on_surface_variant))]
+        } else {
+            rows.iter()
+                .map(|(row, _, _)| {
+                    ListItem::new(Line::from(format!(" {row}")))
+                        .style(Style::default().fg(theme.on_surface))
+                })
+                .collect()
+        };
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(
+                Style::default()
+                    .fg(theme.primary_fg)
+                    .bg(theme.primary_container_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(" ▸ ");
+
+        frame.render_stateful_widget(list, layout[1], &mut self.prompts.state);
+
+        let footer = Line::from(format!(" 当前: {}", if active.is_empty() { "(未激活)" } else { active }));
+        frame.render_widget(
+            Paragraph::new(footer).style(Style::default().fg(theme.on_surface_variant)),
+            layout[2],
+        );
+    }
+
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, theme: &theme::Theme) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -849,6 +913,7 @@ impl<'a> App<'a> {
                 Screen::GlobalSettings => return Ok(Some(self.handle_global_key(code))),
                 Screen::Plugins => return Ok(Some(self.handle_plugins_key(code))),
                 Screen::Platforms => return Ok(Some(self.handle_platforms_key(code))),
+                Screen::Prompts => return Ok(Some(self.handle_prompts_key(code))),
                 _ => match code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         return Ok(Some(AppEvent::Back));
@@ -1388,6 +1453,39 @@ impl<'a> App<'a> {
                 self.platforms.edit_buffer =
                     pages::platforms::platform_field_value(&self.config, selected, 1);
                 self.platforms.editing = true;
+                AppEvent::None
+            }
+            _ => AppEvent::None,
+        }
+    }
+
+    fn handle_prompts_key(&mut self, code: crossterm::event::KeyCode) -> AppEvent {
+        use crossterm::event::KeyCode;
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => AppEvent::Back,
+            KeyCode::Up | KeyCode::Char('k') => {
+                let i = self.prompts.state.selected().unwrap_or(0);
+                self.prompts.state.select(Some(i.saturating_sub(1)));
+                AppEvent::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let rows =
+                    pages::prompts::persona_rows(self.paths, &self.config.prompt.active_persona);
+                let i = self.prompts.state.selected().unwrap_or(0);
+                let next = (i + 1).min(rows.len().saturating_sub(1));
+                self.prompts.state.select(Some(next));
+                AppEvent::None
+            }
+            KeyCode::Enter => {
+                let rows =
+                    pages::prompts::persona_rows(self.paths, &self.config.prompt.active_persona);
+                if let Some(i) = self.prompts.state.selected() {
+                    if let Some((_, name, _)) = rows.get(i) {
+                        self.config.prompt.active_persona = name.clone();
+                        self.dirty = true;
+                    }
+                }
                 AppEvent::None
             }
             _ => AppEvent::None,
